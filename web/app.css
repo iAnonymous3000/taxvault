@@ -830,6 +830,45 @@ body.gate-open {
   font-size: 0.84rem;
 }
 
+.result-meta {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.85rem;
+}
+
+.meta-item {
+  padding: 0.95rem;
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-sm);
+  background: linear-gradient(180deg, rgba(37, 99, 235, 0.04), rgba(15, 23, 42, 0.45));
+}
+
+.meta-label {
+  color: var(--text-muted);
+  font-size: 0.72rem;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.meta-value {
+  margin-top: 0.45rem;
+  color: var(--text-primary);
+  font-size: 0.9rem;
+  font-weight: 700;
+}
+
+.scope-list {
+  margin: 1rem 0 0;
+  padding-left: 1.15rem;
+  color: var(--text-secondary);
+  font-size: 0.86rem;
+}
+
+.scope-list li + li {
+  margin-top: 0.45rem;
+}
+
 .breakdown-section {
   padding: 0.85rem 0 0.3rem;
   color: var(--text-muted);
@@ -905,6 +944,19 @@ body.gate-open {
   word-break: break-word;
 }
 
+.trace-container {
+  margin: 0;
+  padding: 0.9rem 1rem;
+  border-radius: var(--radius-sm);
+  background: rgba(15, 23, 42, 0.65);
+  color: var(--text-secondary);
+  font-family: "SF Mono", "Roboto Mono", Menlo, Consolas, monospace;
+  font-size: 0.79rem;
+  line-height: 1.6;
+  white-space: pre-wrap;
+  overflow: auto;
+}
+
 .footer {
   display: flex;
   align-items: center;
@@ -939,13 +991,13 @@ body.gate-open {
   }
 }
 
-/* ── Upload zone ── */
+/* ── Local form preview ── */
 .upload-zone {
   margin-bottom: 1rem;
   padding: 1.5rem 1rem;
   border: 2px dashed var(--border-strong);
   border-radius: var(--radius-sm);
-  background: rgba(37, 99, 235, 0.04);
+  background: rgba(245, 158, 11, 0.04);
   text-align: center;
   cursor: pointer;
   transition: border-color 0.15s ease, background 0.15s ease;
@@ -954,8 +1006,8 @@ body.gate-open {
 
 .upload-zone:hover,
 .upload-zone.dragover {
-  border-color: rgba(96, 165, 250, 0.5);
-  background: rgba(37, 99, 235, 0.08);
+  border-color: rgba(251, 191, 36, 0.45);
+  background: rgba(245, 158, 11, 0.08);
 }
 
 .upload-zone-icon {
@@ -971,7 +1023,7 @@ body.gate-open {
 }
 
 .upload-zone-text strong {
-  color: var(--blue-300);
+  color: var(--amber-700);
 }
 
 .upload-zone-hint {
@@ -1062,6 +1114,10 @@ body.gate-open {
   }
 
   .entry-guide {
+    grid-template-columns: 1fr;
+  }
+
+  .result-meta {
     grid-template-columns: 1fr;
   }
 

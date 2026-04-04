@@ -46,7 +46,12 @@ const els = {
   linesToggle: document.getElementById("linesToggle"),
   linesArrow: document.getElementById("linesArrow"),
   linesContainer: document.getElementById("linesContainer"),
+  traceToggle: document.getElementById("traceToggle"),
+  traceArrow: document.getElementById("traceArrow"),
+  traceContainer: document.getElementById("traceContainer"),
   resultHero: document.getElementById("resultHero"),
+  resultMeta: document.getElementById("resultMeta"),
+  scopeList: document.getElementById("scopeList"),
   breakdownContent: document.getElementById("breakdownContent"),
 };
 
@@ -84,6 +89,7 @@ function bindStaticEvents() {
   els.clearAllBtn.addEventListener("click", clearAllData);
   els.computeBtn.addEventListener("click", computeReturn);
   els.linesToggle.addEventListener("click", toggleLines);
+  els.traceToggle.addEventListener("click", toggleTrace);
 
   bindSsnFields(document);
   updateDependentSubtitle(false);
@@ -395,8 +401,8 @@ function addW2() {
     event.target.value = formatDigits(event.target.value, [2, 7]);
   });
 
-  const uploadZone = createUploadZone("W-2");
-  card.insertBefore(uploadZone, card.querySelector(".w2-essential"));
+  const referenceZone = createReferenceZone("W-2");
+  card.insertBefore(referenceZone, card.querySelector(".w2-essential"));
 
   els.w2Container.append(card);
   updateRemoveButtons();
@@ -436,8 +442,8 @@ function addSocialSecurity() {
 
   card.querySelector(".remove-ssa-btn").addEventListener("click", () => removeSocialSecurity(card));
 
-  const ssaUpload = createUploadZone("SSA-1099");
-  card.insertBefore(ssaUpload, card.querySelector(".row"));
+  const referenceZone = createReferenceZone("SSA-1099");
+  card.insertBefore(referenceZone, card.querySelector(".row"));
 
   els.socialSecurityContainer.append(card);
   updateSocialSecurityRemoveButtons();
@@ -483,8 +489,8 @@ function addInterest() {
     .querySelector(".remove-interest-btn")
     .addEventListener("click", () => removeInterest(card));
 
-  const intUpload = createUploadZone("1099-INT");
-  card.insertBefore(intUpload, card.querySelector(".row"));
+  const referenceZone = createReferenceZone("1099-INT");
+  card.insertBefore(referenceZone, card.querySelector(".row"));
 
   els.interestContainer.append(card);
   updateInterestRemoveButtons();
@@ -530,8 +536,8 @@ function addDividend() {
     .querySelector(".remove-dividend-btn")
     .addEventListener("click", () => removeDividend(card));
 
-  const divUpload = createUploadZone("1099-DIV");
-  card.insertBefore(divUpload, card.querySelector(".row"));
+  const referenceZone = createReferenceZone("1099-DIV");
+  card.insertBefore(referenceZone, card.querySelector(".row"));
 
   els.dividendContainer.append(card);
   updateDividendRemoveButtons();
@@ -712,6 +718,13 @@ function toggleLines() {
   els.linesContainer.classList.toggle("open", open);
   els.linesArrow.classList.toggle("open", open);
   els.linesToggle.setAttribute("aria-expanded", String(open));
+}
+
+function toggleTrace() {
+  const open = !els.traceContainer.classList.contains("open");
+  els.traceContainer.classList.toggle("open", open);
+  els.traceArrow.classList.toggle("open", open);
+  els.traceToggle.setAttribute("aria-expanded", String(open));
 }
 
 function computeReturn() {
@@ -1155,12 +1168,17 @@ function collectW2Cards(errors) {
 
 function renderResults(data) {
   renderHero(data.summary);
+  renderMeta(data.meta);
   renderBreakdown(data.summary);
+  renderTrace(data.trace);
   renderLines(data.form?.lines || {});
 
   els.linesContainer.classList.remove("open");
   els.linesArrow.classList.remove("open");
   els.linesToggle.setAttribute("aria-expanded", "false");
+  els.traceContainer.classList.remove("open");
+  els.traceArrow.classList.remove("open");
+  els.traceToggle.setAttribute("aria-expanded", "false");
 }
 
 function renderHero(summary) {
@@ -1258,6 +1276,47 @@ function renderBreakdown(summary) {
     );
     els.breakdownContent.append(breakdownRow);
   });
+}
+
+function renderMeta(meta) {
+  els.resultMeta.replaceChildren();
+  els.scopeList.replaceChildren();
+
+  if (!meta) {
+    return;
+  }
+
+  const rows = [
+    { label: "Estimate Scope", value: meta.estimate_scope },
+    {
+      label: "Tax Table Status",
+      value: meta.tax_table_verified
+        ? "Verified embedded 2025 federal tax table"
+        : "Unverified table detected. TaxVault should refuse to calculate.",
+    },
+    { label: "Rule Pack", value: `Federal rules version ${meta.rule_pack_version}` },
+    { label: "Privacy", value: meta.privacy },
+  ];
+
+  rows.forEach((row) => {
+    const card = createElement("div", { className: "meta-item" });
+    card.append(
+      createElement("div", { className: "meta-label", text: row.label }),
+      createElement("div", { className: "meta-value", text: row.value })
+    );
+    els.resultMeta.append(card);
+  });
+
+  (meta.scope_limits || []).forEach((item) => {
+    const li = document.createElement("li");
+    li.textContent = item;
+    els.scopeList.append(li);
+  });
+}
+
+function renderTrace(trace) {
+  els.traceContainer.textContent = trace || "Trace unavailable.";
+  els.traceContainer.scrollTop = 0;
 }
 
 function renderLines(lines) {
@@ -1374,7 +1433,13 @@ function clearAllData() {
   els.dividendContainer.replaceChildren();
   els.dependentContainer.replaceChildren();
   els.resultHero.replaceChildren();
+  els.resultMeta.replaceChildren();
+  els.scopeList.replaceChildren();
   els.breakdownContent.replaceChildren();
+  els.traceContainer.textContent = "";
+  els.traceContainer.classList.remove("open");
+  els.traceArrow.classList.remove("open");
+  els.traceToggle.setAttribute("aria-expanded", "false");
   els.linesContainer.replaceChildren();
   els.linesContainer.classList.remove("open");
   els.linesArrow.classList.remove("open");
@@ -1417,18 +1482,18 @@ function createElement(tagName, { className = "", text = "" } = {}) {
   return element;
 }
 
-/* ── Document Upload ── */
+/* ── Local Form Preview ── */
 
 const ACCEPTED_TYPES = ".pdf,.png,.jpg,.jpeg,.heic,.webp";
 
-function createUploadZone(formLabel) {
+function createReferenceZone(formLabel) {
   const wrapper = document.createElement("div");
   wrapper.className = "upload-zone-wrapper";
 
   const zone = document.createElement("div");
   zone.className = "upload-zone";
   zone.setAttribute("role", "button");
-  zone.setAttribute("aria-label", `Upload ${formLabel} document`);
+  zone.setAttribute("aria-label", `Choose a local ${formLabel} file to preview on screen`);
   zone.setAttribute("tabindex", "0");
   zone.innerHTML = `
     <svg class="upload-zone-icon" width="28" height="28" viewBox="0 0 24 24" fill="none"
@@ -1439,9 +1504,11 @@ function createUploadZone(formLabel) {
       <line x1="12" y1="3" x2="12" y2="15"/>
     </svg>
     <div class="upload-zone-text">
-      Drop your <strong>${formLabel}</strong> here or tap to browse
+      Preview a local <strong>${formLabel}</strong> copy here (optional)
     </div>
-    <div class="upload-zone-hint">PDF, PNG, JPG, HEIC, or WEBP</div>
+    <div class="upload-zone-hint">
+      On-screen reference only. TaxVault does not read or import fields from files.
+    </div>
   `;
 
   const fileInput = document.createElement("input");

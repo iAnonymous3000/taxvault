@@ -441,10 +441,33 @@
 
       <div class="card">
         <div class="card-header">
+          <h2 class="card-title">Safety &amp; Scope</h2>
+          <p class="card-subtitle">Review these limits before relying on the estimate.</p>
+        </div>
+        <div class="result-meta" id="resultMeta"></div>
+        <ul class="scope-list" id="scopeList"></ul>
+      </div>
+
+      <div class="card">
+        <div class="card-header">
           <h2 class="card-title" id="resultTitle">Tax Breakdown</h2>
           <p class="card-subtitle">Review this before relying on the estimate.</p>
         </div>
         <div class="breakdown" id="breakdownContent"></div>
+      </div>
+
+      <div class="card">
+        <button
+          class="lines-toggle"
+          id="traceToggle"
+          type="button"
+          aria-controls="traceContainer"
+          aria-expanded="false"
+        >
+          <span class="arrow" id="traceArrow" aria-hidden="true">&#9654;</span>
+          Calculation Trace
+        </button>
+        <pre class="trace-container lines-container" id="traceContainer"></pre>
       </div>
 
       <div class="card">

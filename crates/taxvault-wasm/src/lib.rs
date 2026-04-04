@@ -21,6 +21,10 @@ struct WasmResult {
     summary: Option<TaxSummary>,
     #[serde(skip_serializing_if = "Option::is_none")]
     form: Option<FormLineMap>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    meta: Option<EstimateMeta>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    trace: Option<String>,
 }
 
 #[derive(Serialize)]
@@ -51,6 +55,15 @@ struct TaxSummary {
     overpayment: String,
 }
 
+#[derive(Serialize)]
+struct EstimateMeta {
+    rule_pack_version: String,
+    tax_table_verified: bool,
+    estimate_scope: String,
+    privacy: String,
+    scope_limits: Vec<String>,
+}
+
 fn decimal_str(d: Decimal) -> String {
     d.round_dp(2).to_string()
 }
@@ -76,6 +89,8 @@ fn compute_tax_inner(json_input: &str) -> WasmResult {
                 error: Some(format!("Rule pack error: {error}")),
                 summary: None,
                 form: None,
+                meta: None,
+                trace: None,
             }
         }
     };
@@ -89,6 +104,8 @@ fn compute_tax_inner(json_input: &str) -> WasmResult {
                 error: Some(format!("Input error: {e}")),
                 summary: None,
                 form: None,
+                meta: None,
+                trace: None,
             }
         }
     };
@@ -98,9 +115,11 @@ fn compute_tax_inner(json_input: &str) -> WasmResult {
         let msgs: Vec<String> = errs.iter().map(|e| e.to_string()).collect();
         return WasmResult {
             success: false,
-            error: Some(format!("Validation errors: {}", msgs.join("; "))),
+            error: Some(format_error_list("Please fix these input issues:", &msgs)),
             summary: None,
             form: None,
+            meta: None,
+            trace: None,
         };
     }
 
@@ -109,16 +128,19 @@ fn compute_tax_inner(json_input: &str) -> WasmResult {
         let msgs: Vec<String> = errs.iter().map(|e| e.to_string()).collect();
         return WasmResult {
             success: false,
-            error: Some(format!("Unsupported: {}", msgs.join("; "))),
+            error: Some(format_error_list(
+                "This return is outside TaxVault's supported estimate slice:",
+                &msgs,
+            )),
             summary: None,
             form: None,
+            meta: None,
+            trace: None,
         };
     }
 
-    // Compute (allow unverified table since we embed a placeholder)
-    let options = ComputeOptions {
-        allow_unverified_table: true,
-    };
+    // Fail closed if a future embedded tax table is not verified.
+    let options = ComputeOptions::default();
     let result = match compute(&facts, rules, &options) {
         Ok(r) => r,
         Err(e) => {
@@ -127,12 +149,15 @@ fn compute_tax_inner(json_input: &str) -> WasmResult {
                 error: Some(format!("Computation error: {e}")),
                 summary: None,
                 form: None,
+                meta: None,
+                trace: None,
             }
         }
     };
 
     // Form compilation
     let form = compile_1040(&result);
+    let trace = result.trace.display_tree();
 
     let summary = TaxSummary {
         tax_year: result.tax_year,
@@ -160,12 +185,37 @@ fn compute_tax_inner(json_input: &str) -> WasmResult {
         balance_due: decimal_str(result.balance_due),
         overpayment: decimal_str(result.overpayment),
     };
+    let meta = EstimateMeta {
+        rule_pack_version: result.rule_pack_version.clone(),
+        tax_table_verified: rules.meta.table_verified,
+        estimate_scope:
+            "Narrow 2025 federal estimate for supported W-2, SSA-1099, 1099-INT, and 1099-DIV scenarios only."
+                .into(),
+        privacy: "Runs entirely in your browser. Entered tax data stays on this page unless you choose to share it elsewhere."
+            .into(),
+        scope_limits: vec![
+            "Not a filing product, signed return, or payment recommendation.".into(),
+            "Does not support EIC, itemized deductions, pensions, IRA distributions, Schedule C, capital gains schedules, ACA credits, or most other federal schedules."
+                .into(),
+            "Head of Household and dependency qualification rules are not fully verified by the app.".into(),
+        ],
+    };
 
     WasmResult {
         success: true,
         error: None,
         summary: Some(summary),
         form: Some(form),
+        meta: Some(meta),
+        trace: Some(trace),
+    }
+}
+
+fn format_error_list(prefix: &str, messages: &[String]) -> String {
+    if messages.is_empty() {
+        prefix.to_string()
+    } else {
+        format!("{prefix}\n- {}", messages.join("\n- "))
     }
 }
 
@@ -194,6 +244,11 @@ mod tests {
             Some(2025)
         );
         assert!(result.form.is_some());
+        assert!(result.meta.is_some());
+        assert!(result
+            .trace
+            .as_deref()
+            .is_some_and(|trace| trace.contains("Result")));
     }
 
     #[test]
