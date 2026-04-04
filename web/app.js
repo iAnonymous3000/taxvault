@@ -395,6 +395,9 @@ function addW2() {
     event.target.value = formatDigits(event.target.value, [2, 7]);
   });
 
+  const uploadZone = createUploadZone("W-2");
+  card.insertBefore(uploadZone, card.querySelector(".w2-essential"));
+
   els.w2Container.append(card);
   updateRemoveButtons();
 }
@@ -432,6 +435,9 @@ function addSocialSecurity() {
   `;
 
   card.querySelector(".remove-ssa-btn").addEventListener("click", () => removeSocialSecurity(card));
+
+  const ssaUpload = createUploadZone("SSA-1099");
+  card.insertBefore(ssaUpload, card.querySelector(".row"));
 
   els.socialSecurityContainer.append(card);
   updateSocialSecurityRemoveButtons();
@@ -477,6 +483,9 @@ function addInterest() {
     .querySelector(".remove-interest-btn")
     .addEventListener("click", () => removeInterest(card));
 
+  const intUpload = createUploadZone("1099-INT");
+  card.insertBefore(intUpload, card.querySelector(".row"));
+
   els.interestContainer.append(card);
   updateInterestRemoveButtons();
 }
@@ -520,6 +529,9 @@ function addDividend() {
   card
     .querySelector(".remove-dividend-btn")
     .addEventListener("click", () => removeDividend(card));
+
+  const divUpload = createUploadZone("1099-DIV");
+  card.insertBefore(divUpload, card.querySelector(".row"));
 
   els.dividendContainer.append(card);
   updateDividendRemoveButtons();
@@ -1403,4 +1415,124 @@ function createElement(tagName, { className = "", text = "" } = {}) {
   }
 
   return element;
+}
+
+/* ── Document Upload ── */
+
+const ACCEPTED_TYPES = ".pdf,.png,.jpg,.jpeg,.heic,.webp";
+
+function createUploadZone(formLabel) {
+  const wrapper = document.createElement("div");
+  wrapper.className = "upload-zone-wrapper";
+
+  const zone = document.createElement("div");
+  zone.className = "upload-zone";
+  zone.setAttribute("role", "button");
+  zone.setAttribute("aria-label", `Upload ${formLabel} document`);
+  zone.setAttribute("tabindex", "0");
+  zone.innerHTML = `
+    <svg class="upload-zone-icon" width="28" height="28" viewBox="0 0 24 24" fill="none"
+         stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"
+         aria-hidden="true">
+      <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+      <polyline points="17 8 12 3 7 8"/>
+      <line x1="12" y1="3" x2="12" y2="15"/>
+    </svg>
+    <div class="upload-zone-text">
+      Drop your <strong>${formLabel}</strong> here or tap to browse
+    </div>
+    <div class="upload-zone-hint">PDF, PNG, JPG, HEIC, or WEBP</div>
+  `;
+
+  const fileInput = document.createElement("input");
+  fileInput.type = "file";
+  fileInput.accept = ACCEPTED_TYPES;
+  fileInput.setAttribute("aria-hidden", "true");
+  zone.appendChild(fileInput);
+
+  const preview = document.createElement("div");
+  preview.className = "upload-preview-container hidden";
+
+  zone.addEventListener("click", () => fileInput.click());
+  zone.addEventListener("keydown", (e) => {
+    if (e.key === "Enter" || e.key === " ") {
+      e.preventDefault();
+      fileInput.click();
+    }
+  });
+
+  zone.addEventListener("dragover", (e) => {
+    e.preventDefault();
+    zone.classList.add("dragover");
+  });
+  zone.addEventListener("dragleave", () => zone.classList.remove("dragover"));
+  zone.addEventListener("drop", (e) => {
+    e.preventDefault();
+    zone.classList.remove("dragover");
+    if (e.dataTransfer.files.length > 0) {
+      handleUpload(e.dataTransfer.files[0], zone, preview);
+    }
+  });
+
+  fileInput.addEventListener("change", () => {
+    if (fileInput.files.length > 0) {
+      handleUpload(fileInput.files[0], zone, preview);
+      fileInput.value = "";
+    }
+  });
+
+  wrapper.append(zone, preview);
+  return wrapper;
+}
+
+function handleUpload(file, zone, previewContainer) {
+  const isValid = /\.(pdf|png|jpe?g|heic|webp)$/i.test(file.name);
+  if (!isValid) {
+    return;
+  }
+
+  const blobUrl = URL.createObjectURL(file);
+  const isPdf = /\.pdf$/i.test(file.name);
+
+  previewContainer.innerHTML = "";
+
+  const header = document.createElement("div");
+  header.className = "upload-preview-header";
+
+  const name = document.createElement("span");
+  name.className = "upload-preview-name";
+  name.textContent = file.name;
+
+  const removeBtn = document.createElement("button");
+  removeBtn.className = "upload-preview-remove";
+  removeBtn.textContent = "Remove";
+  removeBtn.type = "button";
+  removeBtn.addEventListener("click", () => {
+    URL.revokeObjectURL(blobUrl);
+    previewContainer.classList.add("hidden");
+    previewContainer.innerHTML = "";
+    zone.classList.remove("hidden");
+  });
+
+  header.append(name, removeBtn);
+
+  const body = document.createElement("div");
+  body.className = "upload-preview-body";
+
+  if (isPdf) {
+    const obj = document.createElement("object");
+    obj.data = blobUrl;
+    obj.type = "application/pdf";
+    obj.textContent = "PDF preview not available in this browser.";
+    body.appendChild(obj);
+  } else {
+    const img = document.createElement("img");
+    img.src = blobUrl;
+    img.alt = `Preview of ${file.name}`;
+    body.appendChild(img);
+  }
+
+  previewContainer.append(header, body);
+  previewContainer.classList.remove("hidden");
+  zone.classList.add("hidden");
 }
