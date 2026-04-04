@@ -86,6 +86,21 @@ python3 -m http.server 8000
 
 Then open [http://localhost:8000](http://localhost:8000).
 
+## Deploy To GitHub Pages
+
+This repo includes a GitHub Pages workflow at `.github/workflows/pages.yml`.
+
+To use it:
+
+1. Open `Settings` -> `Pages`
+2. Set `Source` to `GitHub Actions`
+3. Push to `main`
+4. Wait for the `Deploy Pages` workflow to finish
+
+The site will be published at:
+
+`https://ianonymous3000.github.io/taxvault/`
+
 ## Test Data
 
 Golden vectors live in `tests/golden_vectors/` and cover the currently supported return slice, including Social Security benefit taxability edge cases.
