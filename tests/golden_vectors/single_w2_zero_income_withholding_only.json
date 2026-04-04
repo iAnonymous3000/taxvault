@@ -1,0 +1,50 @@
+{
+  "metadata": {
+    "description": "Single filer, wages fully absorbed by the standard deduction, withholding refunded in full",
+    "source": "Form 1040 line 15 floor at zero, with withholding refunded on lines 33 and 34",
+    "verified_against_published_table": false,
+    "expected_tax_value": 0
+  },
+  "input": {
+    "tax_year": 2025,
+    "filing_status": "single",
+    "primary_filer": {
+      "first_name": "Skyler",
+      "last_name": "Zero",
+      "ssn": "400-24-0024",
+      "date_of_birth": "1994-08-16",
+      "is_blind": false,
+      "is_dependent": false
+    },
+    "spouse": null,
+    "dependents": [],
+    "w2_income": [
+      {
+        "recipient": "primary",
+        "employer_name": "Corrected Payroll",
+        "employer_ein": "66-6666671",
+        "wages": 750,
+        "federal_tax_withheld": 750,
+        "state_tax_withheld": 0,
+        "social_security_wages": 750,
+        "social_security_tax_withheld": 46.5,
+        "medicare_wages": 750,
+        "medicare_tax_withheld": 10.875
+      }
+    ]
+  },
+  "expected": {
+    "total_wages": 750,
+    "adjusted_gross_income": 750,
+    "standard_deduction": 15750,
+    "taxable_income": 0,
+    "income_tax": 0,
+    "child_dependent_credit": 0,
+    "additional_child_tax_credit": 0,
+    "total_tax": 0,
+    "total_federal_withholding": 750,
+    "total_payments": 750,
+    "overpayment": 750,
+    "balance_due": 0
+  }
+}

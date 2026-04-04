@@ -1,0 +1,59 @@
+{
+  "metadata": {
+    "description": "Head of Household, one qualifying child, $50,000 wages",
+    "source": "2025 IRS Tax Table, head of household column, $26,350 row, plus 2025 Schedule 8812",
+    "verified_against_published_table": true,
+    "expected_tax_value": 2825
+  },
+  "input": {
+    "tax_year": 2025,
+    "filing_status": "head_of_household",
+    "primary_filer": {
+      "first_name": "Taylor",
+      "last_name": "Household",
+      "ssn": "400-19-0019",
+      "date_of_birth": "1990-01-28",
+      "is_blind": false,
+      "is_dependent": false
+    },
+    "spouse": null,
+    "dependents": [
+      {
+        "first_name": "Harper",
+        "last_name": "Household",
+        "ssn": "400-20-0020",
+        "date_of_birth": "2014-07-05",
+        "relationship": "daughter",
+        "months_lived_in_home": 12
+      }
+    ],
+    "w2_income": [
+      {
+        "recipient": "primary",
+        "employer_name": "City Services",
+        "employer_ein": "66-6666667",
+        "wages": 50000,
+        "federal_tax_withheld": 4500,
+        "state_tax_withheld": 1800,
+        "social_security_wages": 50000,
+        "social_security_tax_withheld": 3100,
+        "medicare_wages": 50000,
+        "medicare_tax_withheld": 725
+      }
+    ]
+  },
+  "expected": {
+    "total_wages": 50000,
+    "adjusted_gross_income": 50000,
+    "standard_deduction": 23625,
+    "taxable_income": 26375,
+    "income_tax": 2825,
+    "child_dependent_credit": 2200,
+    "additional_child_tax_credit": 0,
+    "total_tax": 625,
+    "total_federal_withholding": 4500,
+    "total_payments": 4500,
+    "overpayment": 3875,
+    "balance_due": 0
+  }
+}

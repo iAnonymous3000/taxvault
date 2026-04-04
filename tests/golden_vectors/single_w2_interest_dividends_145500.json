@@ -1,0 +1,63 @@
+{
+  "metadata": {
+    "description": "Single filer, W-2 plus 1099-INT and qualified dividends",
+    "source": "2025 Form 1040 Qualified Dividends and Capital Gain Tax Worksheet with 2025 single rate thresholds",
+    "verified_against_published_table": true,
+    "expected_tax_value": 23537
+  },
+  "input": {
+    "tax_year": 2025,
+    "filing_status": "single",
+    "primary_filer": {
+      "first_name": "Jordan",
+      "last_name": "Investor",
+      "ssn": "400-04-0004",
+      "date_of_birth": "1988-08-12",
+      "is_blind": false,
+      "is_dependent": false
+    },
+    "spouse": null,
+    "w2_income": [
+      {
+        "recipient": "primary",
+        "employer_name": "Growth Corp",
+        "employer_ein": "33-3333333",
+        "wages": 140000,
+        "federal_tax_withheld": 30000,
+        "state_tax_withheld": 7000,
+        "social_security_wages": 140000,
+        "social_security_tax_withheld": 8680,
+        "medicare_wages": 140000,
+        "medicare_tax_withheld": 2030
+      }
+    ],
+    "interest_income": [
+      {
+        "recipient": "primary",
+        "payer_name": "Summit Bank",
+        "taxable_interest": 500,
+        "tax_exempt_interest": 300
+      }
+    ],
+    "dividend_income": [
+      {
+        "recipient": "primary",
+        "payer_name": "North Brokerage",
+        "ordinary_dividends": 5000,
+        "qualified_dividends": 5000
+      }
+    ]
+  },
+  "expected": {
+    "total_wages": 140000,
+    "adjusted_gross_income": 145500,
+    "standard_deduction": 15750,
+    "taxable_income": 129750,
+    "income_tax": 23537,
+    "total_tax": 23537,
+    "total_federal_withholding": 30000,
+    "total_payments": 30000,
+    "overpayment": 6463,
+    "balance_due": 0
+  }
+}

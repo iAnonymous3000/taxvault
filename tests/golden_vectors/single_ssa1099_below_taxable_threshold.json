@@ -1,0 +1,60 @@
+{
+  "metadata": {
+    "description": "Single filer, W-2 plus SSA-1099 below the Social Security taxable threshold",
+    "source": "2025 Social Security Benefits Worksheet combined income threshold",
+    "verified_against_published_table": true
+  },
+  "input": {
+    "tax_year": 2025,
+    "filing_status": "single",
+    "primary_filer": {
+      "first_name": "Test",
+      "last_name": "Filer",
+      "ssn": "400-01-0001",
+      "date_of_birth": "1960-06-15",
+      "is_blind": false,
+      "is_dependent": false
+    },
+    "spouse": null,
+    "w2_income": [
+      {
+        "recipient": "primary",
+        "employer_name": "Test Corp",
+        "employer_ein": "12-3456789",
+        "wages": 12000,
+        "federal_tax_withheld": 800,
+        "state_tax_withheld": 500,
+        "social_security_wages": 12000,
+        "social_security_tax_withheld": 744,
+        "medicare_wages": 12000,
+        "medicare_tax_withheld": 174
+      }
+    ],
+    "social_security_income": [
+      {
+        "recipient": "primary",
+        "total_benefits": 24000,
+        "voluntary_withholding": 0
+      }
+    ]
+  },
+  "expected": {
+    "total_wages": 12000,
+    "total_social_security_benefits": 24000,
+    "taxable_social_security_benefits": 0,
+    "total_income": 12000,
+    "adjusted_gross_income": 12000,
+    "standard_deduction": 17750,
+    "taxable_income": 0,
+    "income_tax": 0,
+    "child_dependent_credit": 0,
+    "additional_child_tax_credit": 0,
+    "total_tax": 0,
+    "total_w2_federal_withholding": 800,
+    "total_social_security_withholding": 0,
+    "total_federal_withholding": 800,
+    "total_payments": 800,
+    "overpayment": 800,
+    "balance_due": 0
+  }
+}

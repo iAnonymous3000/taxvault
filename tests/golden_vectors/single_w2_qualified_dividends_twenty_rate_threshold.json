@@ -1,0 +1,58 @@
+{
+  "metadata": {
+    "description": "Single filer, W-2 plus qualified dividends crossing into the 20% capital gain rate",
+    "source": "2025 Form 1040 Instructions, Qualified Dividends and Capital Gain Tax Worksheet (line 16), and 2025 Tax Computation Worksheet, single section",
+    "verified_against_published_table": false,
+    "expected_tax_value": 99609.50
+  },
+  "input": {
+    "tax_year": 2025,
+    "filing_status": "single",
+    "primary_filer": {
+      "first_name": "Avery",
+      "last_name": "Capital",
+      "ssn": "400-10-0010",
+      "date_of_birth": "1985-07-22",
+      "is_blind": false,
+      "is_dependent": false
+    },
+    "spouse": null,
+    "dependents": [],
+    "w2_income": [
+      {
+        "recipient": "primary",
+        "employer_name": "Long Horizon Inc",
+        "employer_ein": "66-6666662",
+        "wages": 200000,
+        "federal_tax_withheld": 95000,
+        "state_tax_withheld": 12000,
+        "social_security_wages": 176100,
+        "social_security_tax_withheld": 10918.2,
+        "medicare_wages": 200000,
+        "medicare_tax_withheld": 2900
+      }
+    ],
+    "dividend_income": [
+      {
+        "recipient": "primary",
+        "payer_name": "Summit Brokerage",
+        "ordinary_dividends": 400000,
+        "qualified_dividends": 400000
+      }
+    ]
+  },
+  "expected": {
+    "total_wages": 200000,
+    "adjusted_gross_income": 600000,
+    "standard_deduction": 15750,
+    "taxable_income": 584250,
+    "income_tax": 99609.50,
+    "child_dependent_credit": 0,
+    "additional_child_tax_credit": 0,
+    "total_tax": 99609.50,
+    "total_federal_withholding": 95000,
+    "total_payments": 95000,
+    "overpayment": 0,
+    "balance_due": 4609.50
+  }
+}

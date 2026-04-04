@@ -1,0 +1,69 @@
+{
+  "metadata": {
+    "description": "MFJ, both spouses age 65 or older, one spouse blind, two W-2s",
+    "source": "2025 IRS Tax Table, married filing jointly column, $31,500 row, plus 2025 standard deduction adjustments for age and blindness",
+    "verified_against_published_table": true,
+    "expected_tax_value": 3306
+  },
+  "input": {
+    "tax_year": 2025,
+    "filing_status": "married_filing_jointly",
+    "primary_filer": {
+      "first_name": "Leslie",
+      "last_name": "Senior",
+      "ssn": "400-22-0022",
+      "date_of_birth": "1957-01-12",
+      "is_blind": false,
+      "is_dependent": false
+    },
+    "spouse": {
+      "first_name": "Dana",
+      "last_name": "Senior",
+      "ssn": "400-23-0023",
+      "date_of_birth": "1959-09-08",
+      "is_blind": true,
+      "is_dependent": false
+    },
+    "dependents": [],
+    "w2_income": [
+      {
+        "recipient": "primary",
+        "employer_name": "Heritage Clinic",
+        "employer_ein": "66-6666669",
+        "wages": 35000,
+        "federal_tax_withheld": 2600,
+        "state_tax_withheld": 900,
+        "social_security_wages": 35000,
+        "social_security_tax_withheld": 2170,
+        "medicare_wages": 35000,
+        "medicare_tax_withheld": 507.5
+      },
+      {
+        "recipient": "spouse",
+        "employer_name": "Harbor Museum",
+        "employer_ein": "66-6666670",
+        "wages": 32800,
+        "federal_tax_withheld": 2400,
+        "state_tax_withheld": 850,
+        "social_security_wages": 32800,
+        "social_security_tax_withheld": 2033.6,
+        "medicare_wages": 32800,
+        "medicare_tax_withheld": 475.6
+      }
+    ]
+  },
+  "expected": {
+    "total_wages": 67800,
+    "adjusted_gross_income": 67800,
+    "standard_deduction": 36300,
+    "taxable_income": 31500,
+    "income_tax": 3306,
+    "child_dependent_credit": 0,
+    "additional_child_tax_credit": 0,
+    "total_tax": 3306,
+    "total_federal_withholding": 5000,
+    "total_payments": 5000,
+    "overpayment": 1694,
+    "balance_due": 0
+  }
+}

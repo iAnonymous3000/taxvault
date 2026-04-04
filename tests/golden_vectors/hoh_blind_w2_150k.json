@@ -1,0 +1,57 @@
+{
+  "metadata": {
+    "description": "Head of Household, one W-2, blind filer, $150,000 wages",
+    "source": "Tax Computation Worksheet, deterministic from bracket schedule with HOH standard deduction plus blindness adjustment",
+    "verified_against_published_table": false,
+    "expected_tax_value": 20958
+  },
+  "input": {
+    "tax_year": 2025,
+    "filing_status": "head_of_household",
+    "primary_filer": {
+      "first_name": "Taylor",
+      "last_name": "Filer",
+      "ssn": "400-01-0001",
+      "date_of_birth": "1990-06-15",
+      "is_blind": true,
+      "is_dependent": false
+    },
+    "spouse": null,
+    "dependents": [
+      {
+        "first_name": "Casey",
+        "last_name": "Filer",
+        "ssn": "400-03-0003",
+        "date_of_birth": "2015-04-10",
+        "relationship": "daughter",
+        "months_lived_in_home": 12
+      }
+    ],
+    "w2_income": [
+      {
+        "recipient": "primary",
+        "employer_name": "Big Corp",
+        "employer_ein": "98-7654321",
+        "wages": 150000,
+        "federal_tax_withheld": 25000,
+        "state_tax_withheld": 7500,
+        "social_security_wages": 150000,
+        "social_security_tax_withheld": 9300,
+        "medicare_wages": 150000,
+        "medicare_tax_withheld": 2175
+      }
+    ]
+  },
+  "expected": {
+    "total_wages": 150000,
+    "adjusted_gross_income": 150000,
+    "standard_deduction": 25625,
+    "taxable_income": 124375,
+    "income_tax": 20958,
+    "total_tax": 18758,
+    "total_federal_withholding": 25000,
+    "total_payments": 25000,
+    "overpayment": 6242,
+    "balance_due": 0
+  }
+}

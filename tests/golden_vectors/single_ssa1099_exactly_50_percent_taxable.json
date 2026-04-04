@@ -1,0 +1,60 @@
+{
+  "metadata": {
+    "description": "Single filer, SSA-1099 benefits with taxable portion capped at exactly 50 percent",
+    "source": "2025 Social Security Benefits Worksheet lower threshold band and Form 1040 tax table",
+    "verified_against_published_table": true
+  },
+  "input": {
+    "tax_year": 2025,
+    "filing_status": "single",
+    "primary_filer": {
+      "first_name": "Test",
+      "last_name": "Filer",
+      "ssn": "400-01-0001",
+      "date_of_birth": "1960-06-15",
+      "is_blind": false,
+      "is_dependent": false
+    },
+    "spouse": null,
+    "w2_income": [
+      {
+        "recipient": "primary",
+        "employer_name": "Test Corp",
+        "employer_ein": "12-3456789",
+        "wages": 29000,
+        "federal_tax_withheld": 3500,
+        "state_tax_withheld": 1100,
+        "social_security_wages": 29000,
+        "social_security_tax_withheld": 1798,
+        "medicare_wages": 29000,
+        "medicare_tax_withheld": 420.5
+      }
+    ],
+    "social_security_income": [
+      {
+        "recipient": "primary",
+        "total_benefits": 8000,
+        "voluntary_withholding": 0
+      }
+    ]
+  },
+  "expected": {
+    "total_wages": 29000,
+    "total_social_security_benefits": 8000,
+    "taxable_social_security_benefits": 4000,
+    "total_income": 33000,
+    "adjusted_gross_income": 33000,
+    "standard_deduction": 17750,
+    "taxable_income": 15250,
+    "income_tax": 1595,
+    "child_dependent_credit": 0,
+    "additional_child_tax_credit": 0,
+    "total_tax": 1595,
+    "total_w2_federal_withholding": 3500,
+    "total_social_security_withholding": 0,
+    "total_federal_withholding": 3500,
+    "total_payments": 3500,
+    "overpayment": 1905,
+    "balance_due": 0
+  }
+}

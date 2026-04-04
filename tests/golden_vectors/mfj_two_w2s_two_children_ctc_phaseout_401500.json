@@ -1,0 +1,94 @@
+{
+  "metadata": {
+    "description": "MFJ, two W-2s, two qualifying children, CTC phaseout above the $400,000 threshold",
+    "source": "2025 Schedule 8812 lines 8 through 14 and 2025 Tax Computation Worksheet, married filing jointly section",
+    "verified_against_published_table": false,
+    "expected_tax_value": 74494
+  },
+  "input": {
+    "tax_year": 2025,
+    "filing_status": "married_filing_jointly",
+    "primary_filer": {
+      "first_name": "Jamie",
+      "last_name": "Threshold",
+      "ssn": "400-13-0013",
+      "date_of_birth": "1984-04-12",
+      "is_blind": false,
+      "is_dependent": false
+    },
+    "spouse": {
+      "first_name": "Morgan",
+      "last_name": "Threshold",
+      "ssn": "400-14-0014",
+      "date_of_birth": "1985-12-02",
+      "is_blind": false,
+      "is_dependent": false
+    },
+    "dependents": [
+      {
+        "first_name": "Parker",
+        "last_name": "Threshold",
+        "ssn": "400-15-0015",
+        "date_of_birth": "2015-06-03",
+        "relationship": "son",
+        "months_lived_in_home": 12
+      },
+      {
+        "first_name": "Quinn",
+        "last_name": "Threshold",
+        "ssn": "400-16-0016",
+        "date_of_birth": "2018-11-19",
+        "relationship": "daughter",
+        "months_lived_in_home": 12
+      }
+    ],
+    "w2_income": [
+      {
+        "recipient": "primary",
+        "employer_name": "Apex Manufacturing",
+        "employer_ein": "66-6666664",
+        "wages": 125000,
+        "federal_tax_withheld": 36000,
+        "state_tax_withheld": 10000,
+        "social_security_wages": 125000,
+        "social_security_tax_withheld": 7750,
+        "medicare_wages": 125000,
+        "medicare_tax_withheld": 1812.5
+      },
+      {
+        "recipient": "spouse",
+        "employer_name": "Beacon Health",
+        "employer_ein": "66-6666665",
+        "wages": 125000,
+        "federal_tax_withheld": 36000,
+        "state_tax_withheld": 8500,
+        "social_security_wages": 125000,
+        "social_security_tax_withheld": 7750,
+        "medicare_wages": 125000,
+        "medicare_tax_withheld": 1812.5
+      }
+    ],
+    "dividend_income": [
+      {
+        "recipient": "primary",
+        "payer_name": "Canyon Brokerage",
+        "ordinary_dividends": 151500,
+        "qualified_dividends": 0
+      }
+    ]
+  },
+  "expected": {
+    "total_wages": 250000,
+    "adjusted_gross_income": 401500,
+    "standard_deduction": 31500,
+    "taxable_income": 370000,
+    "income_tax": 74494,
+    "child_dependent_credit": 4300,
+    "additional_child_tax_credit": 0,
+    "total_tax": 70194,
+    "total_federal_withholding": 72000,
+    "total_payments": 72000,
+    "overpayment": 1806,
+    "balance_due": 0
+  }
+}

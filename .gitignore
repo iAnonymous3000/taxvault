@@ -1,0 +1,15 @@
+/target/
+/web/pkg/
+
+# Local assistant / editor state
+/.claude/
+/.idea/
+/.vscode/
+
+# OS noise
+.DS_Store
+
+# Temporary files
+*.log
+*.swp
+*.swo

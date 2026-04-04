@@ -1,0 +1,84 @@
+{
+  "metadata": {
+    "description": "MFJ, two W-2s, two qualifying children, Child Tax Credit and ACTC",
+    "source": "2025 IRS Tax Table for MFJ taxable income of $38,500 and 2025 Schedule 8812",
+    "verified_against_published_table": true,
+    "expected_tax_value": 4146
+  },
+  "input": {
+    "tax_year": 2025,
+    "filing_status": "married_filing_jointly",
+    "primary_filer": {
+      "first_name": "Alex",
+      "last_name": "Parent",
+      "ssn": "400-05-0005",
+      "date_of_birth": "1987-02-10",
+      "is_blind": false,
+      "is_dependent": false
+    },
+    "spouse": {
+      "first_name": "Sam",
+      "last_name": "Parent",
+      "ssn": "400-06-0006",
+      "date_of_birth": "1988-11-30",
+      "is_blind": false,
+      "is_dependent": false
+    },
+    "dependents": [
+      {
+        "first_name": "Avery",
+        "last_name": "Parent",
+        "ssn": "400-07-0007",
+        "date_of_birth": "2016-05-14",
+        "relationship": "daughter",
+        "months_lived_in_home": 12
+      },
+      {
+        "first_name": "Rowan",
+        "last_name": "Parent",
+        "ssn": "400-08-0008",
+        "date_of_birth": "2019-09-22",
+        "relationship": "son",
+        "months_lived_in_home": 12
+      }
+    ],
+    "w2_income": [
+      {
+        "recipient": "primary",
+        "employer_name": "Primary Works",
+        "employer_ein": "44-4444444",
+        "wages": 40000,
+        "federal_tax_withheld": 3500,
+        "state_tax_withheld": 1500,
+        "social_security_wages": 40000,
+        "social_security_tax_withheld": 2480,
+        "medicare_wages": 40000,
+        "medicare_tax_withheld": 580
+      },
+      {
+        "recipient": "spouse",
+        "employer_name": "Spouse Works",
+        "employer_ein": "55-5555555",
+        "wages": 30000,
+        "federal_tax_withheld": 2500,
+        "state_tax_withheld": 900,
+        "social_security_wages": 30000,
+        "social_security_tax_withheld": 1860,
+        "medicare_wages": 30000,
+        "medicare_tax_withheld": 435
+      }
+    ]
+  },
+  "expected": {
+    "total_wages": 70000,
+    "adjusted_gross_income": 70000,
+    "standard_deduction": 31500,
+    "taxable_income": 38500,
+    "income_tax": 4146,
+    "total_tax": 0,
+    "total_federal_withholding": 6000,
+    "total_payments": 6254,
+    "overpayment": 6254,
+    "balance_due": 0
+  }
+}

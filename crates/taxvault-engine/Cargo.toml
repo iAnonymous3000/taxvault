@@ -1,0 +1,11 @@
+[package]
+name = "taxvault-engine"
+edition.workspace = true
+version.workspace = true
+description.workspace = true
+readme.workspace = true
+
+[dependencies]
+taxvault-core = { path = "../taxvault-core" }
+rust_decimal = { workspace = true }
+thiserror = { workspace = true }

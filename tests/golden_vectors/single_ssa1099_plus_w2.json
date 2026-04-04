@@ -1,0 +1,60 @@
+{
+  "metadata": {
+    "description": "Single filer, W-2 plus SSA-1099 with partially taxable Social Security benefits",
+    "source": "2025 Social Security Benefits Worksheet and Form 1040 tax table",
+    "verified_against_published_table": true
+  },
+  "input": {
+    "tax_year": 2025,
+    "filing_status": "single",
+    "primary_filer": {
+      "first_name": "Test",
+      "last_name": "Filer",
+      "ssn": "400-01-0001",
+      "date_of_birth": "1960-06-15",
+      "is_blind": false,
+      "is_dependent": false
+    },
+    "spouse": null,
+    "w2_income": [
+      {
+        "recipient": "primary",
+        "employer_name": "Test Corp",
+        "employer_ein": "12-3456789",
+        "wages": 30000,
+        "federal_tax_withheld": 3500,
+        "state_tax_withheld": 1200,
+        "social_security_wages": 30000,
+        "social_security_tax_withheld": 1860,
+        "medicare_wages": 30000,
+        "medicare_tax_withheld": 435
+      }
+    ],
+    "social_security_income": [
+      {
+        "recipient": "primary",
+        "total_benefits": 12000,
+        "voluntary_withholding": 600
+      }
+    ]
+  },
+  "expected": {
+    "total_wages": 30000,
+    "total_social_security_benefits": 12000,
+    "taxable_social_security_benefits": 6200,
+    "total_income": 36200,
+    "adjusted_gross_income": 36200,
+    "standard_deduction": 17750,
+    "taxable_income": 18450,
+    "income_tax": 1979,
+    "child_dependent_credit": 0,
+    "additional_child_tax_credit": 0,
+    "total_tax": 1979,
+    "total_w2_federal_withholding": 3500,
+    "total_social_security_withholding": 600,
+    "total_federal_withholding": 4100,
+    "total_payments": 4100,
+    "overpayment": 2121,
+    "balance_due": 0
+  }
+}

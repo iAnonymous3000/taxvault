@@ -1,0 +1,59 @@
+{
+  "metadata": {
+    "description": "Head of Household, one qualifying child, low wages, ACTC limited by 15% of earned income over $2,500",
+    "source": "2025 Schedule 8812 Part II-A, lines 16a through 20",
+    "verified_against_published_table": false,
+    "expected_tax_value": 0
+  },
+  "input": {
+    "tax_year": 2025,
+    "filing_status": "head_of_household",
+    "primary_filer": {
+      "first_name": "Casey",
+      "last_name": "Refundable",
+      "ssn": "400-17-0017",
+      "date_of_birth": "1992-10-14",
+      "is_blind": false,
+      "is_dependent": false
+    },
+    "spouse": null,
+    "dependents": [
+      {
+        "first_name": "Evan",
+        "last_name": "Refundable",
+        "ssn": "400-18-0018",
+        "date_of_birth": "2017-02-08",
+        "relationship": "son",
+        "months_lived_in_home": 12
+      }
+    ],
+    "w2_income": [
+      {
+        "recipient": "primary",
+        "employer_name": "Neighborhood Library",
+        "employer_ein": "66-6666666",
+        "wages": 12500,
+        "federal_tax_withheld": 300,
+        "state_tax_withheld": 0,
+        "social_security_wages": 12500,
+        "social_security_tax_withheld": 775,
+        "medicare_wages": 12500,
+        "medicare_tax_withheld": 181.25
+      }
+    ]
+  },
+  "expected": {
+    "total_wages": 12500,
+    "adjusted_gross_income": 12500,
+    "standard_deduction": 23625,
+    "taxable_income": 0,
+    "income_tax": 0,
+    "child_dependent_credit": 0,
+    "additional_child_tax_credit": 1500,
+    "total_tax": 0,
+    "total_federal_withholding": 300,
+    "total_payments": 1800,
+    "overpayment": 1800,
+    "balance_due": 0
+  }
+}

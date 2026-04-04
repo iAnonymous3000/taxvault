@@ -1,0 +1,50 @@
+{
+  "metadata": {
+    "description": "Single filer age 65 or older, one W-2, $40,000 wages",
+    "source": "2025 IRS Tax Table, single column, $22,250 row, plus 2025 standard deduction instructions for age 65 or older",
+    "verified_against_published_table": true,
+    "expected_tax_value": 2435
+  },
+  "input": {
+    "tax_year": 2025,
+    "filing_status": "single",
+    "primary_filer": {
+      "first_name": "Robin",
+      "last_name": "Senior",
+      "ssn": "400-21-0021",
+      "date_of_birth": "1955-03-10",
+      "is_blind": false,
+      "is_dependent": false
+    },
+    "spouse": null,
+    "dependents": [],
+    "w2_income": [
+      {
+        "recipient": "primary",
+        "employer_name": "Community College",
+        "employer_ein": "66-6666668",
+        "wages": 40000,
+        "federal_tax_withheld": 3000,
+        "state_tax_withheld": 1200,
+        "social_security_wages": 40000,
+        "social_security_tax_withheld": 2480,
+        "medicare_wages": 40000,
+        "medicare_tax_withheld": 580
+      }
+    ]
+  },
+  "expected": {
+    "total_wages": 40000,
+    "adjusted_gross_income": 40000,
+    "standard_deduction": 17750,
+    "taxable_income": 22250,
+    "income_tax": 2435,
+    "child_dependent_credit": 0,
+    "additional_child_tax_credit": 0,
+    "total_tax": 2435,
+    "total_federal_withholding": 3000,
+    "total_payments": 3000,
+    "overpayment": 565,
+    "balance_due": 0
+  }
+}

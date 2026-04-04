@@ -1,0 +1,58 @@
+{
+  "metadata": {
+    "description": "Single filer, W-2 plus qualified dividends crossing the 0% capital gain threshold",
+    "source": "2025 Form 1040 Instructions, Qualified Dividends and Capital Gain Tax Worksheet (line 16), plus 2025 IRS Tax Table rows for single taxable income of $44,250 and $54,250",
+    "verified_against_published_table": true,
+    "expected_tax_value": 5960
+  },
+  "input": {
+    "tax_year": 2025,
+    "filing_status": "single",
+    "primary_filer": {
+      "first_name": "Jordan",
+      "last_name": "Threshold",
+      "ssn": "400-09-0009",
+      "date_of_birth": "1991-03-18",
+      "is_blind": false,
+      "is_dependent": false
+    },
+    "spouse": null,
+    "dependents": [],
+    "w2_income": [
+      {
+        "recipient": "primary",
+        "employer_name": "Threshold Labs",
+        "employer_ein": "66-6666661",
+        "wages": 60000,
+        "federal_tax_withheld": 8000,
+        "state_tax_withheld": 2500,
+        "social_security_wages": 60000,
+        "social_security_tax_withheld": 3720,
+        "medicare_wages": 60000,
+        "medicare_tax_withheld": 870
+      }
+    ],
+    "dividend_income": [
+      {
+        "recipient": "primary",
+        "payer_name": "North Harbor Brokerage",
+        "ordinary_dividends": 10000,
+        "qualified_dividends": 10000
+      }
+    ]
+  },
+  "expected": {
+    "total_wages": 60000,
+    "adjusted_gross_income": 70000,
+    "standard_deduction": 15750,
+    "taxable_income": 54250,
+    "income_tax": 5960,
+    "child_dependent_credit": 0,
+    "additional_child_tax_credit": 0,
+    "total_tax": 5960,
+    "total_federal_withholding": 8000,
+    "total_payments": 8000,
+    "overpayment": 2040,
+    "balance_due": 0
+  }
+}

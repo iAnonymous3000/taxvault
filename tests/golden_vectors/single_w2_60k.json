@@ -1,0 +1,47 @@
+{
+  "metadata": {
+    "description": "Single filer, one W-2, $60,000 wages",
+    "source": "2025 IRS Form 1040 Instructions, Tax Table, single column, $44,250 row",
+    "verified_against_published_table": true,
+    "expected_tax_value": 5075
+  },
+  "input": {
+    "tax_year": 2025,
+    "filing_status": "single",
+    "primary_filer": {
+      "first_name": "Test",
+      "last_name": "Filer",
+      "ssn": "400-01-0001",
+      "date_of_birth": "1990-06-15",
+      "is_blind": false,
+      "is_dependent": false
+    },
+    "spouse": null,
+    "w2_income": [
+      {
+        "recipient": "primary",
+        "employer_name": "Test Corp",
+        "employer_ein": "12-3456789",
+        "wages": 60000,
+        "federal_tax_withheld": 8000,
+        "state_tax_withheld": 3000,
+        "social_security_wages": 60000,
+        "social_security_tax_withheld": 3720,
+        "medicare_wages": 60000,
+        "medicare_tax_withheld": 870
+      }
+    ]
+  },
+  "expected": {
+    "total_wages": 60000,
+    "adjusted_gross_income": 60000,
+    "standard_deduction": 15750,
+    "taxable_income": 44250,
+    "income_tax": 5075,
+    "total_tax": 5075,
+    "total_federal_withholding": 8000,
+    "total_payments": 8000,
+    "overpayment": 2925,
+    "balance_due": 0
+  }
+}

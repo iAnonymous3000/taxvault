@@ -1,0 +1,66 @@
+{
+  "metadata": {
+    "description": "MFJ, two W-2s, $125,000 combined wages",
+    "source": "2025 IRS Form 1040 Instructions, Tax Table, MFJ column, $93,500 row",
+    "verified_against_published_table": true,
+    "expected_tax_value": 10746
+  },
+  "input": {
+    "tax_year": 2025,
+    "filing_status": "married_filing_jointly",
+    "primary_filer": {
+      "first_name": "Test",
+      "last_name": "Primary",
+      "ssn": "400-01-0001",
+      "date_of_birth": "1990-06-15",
+      "is_blind": false,
+      "is_dependent": false
+    },
+    "spouse": {
+      "first_name": "Test",
+      "last_name": "Spouse",
+      "ssn": "400-02-0002",
+      "date_of_birth": "1991-03-20",
+      "is_blind": false,
+      "is_dependent": false
+    },
+    "w2_income": [
+      {
+        "recipient": "primary",
+        "employer_name": "Primary Corp",
+        "employer_ein": "11-1111111",
+        "wages": 80000,
+        "federal_tax_withheld": 12000,
+        "state_tax_withheld": 4000,
+        "social_security_wages": 80000,
+        "social_security_tax_withheld": 4960,
+        "medicare_wages": 80000,
+        "medicare_tax_withheld": 1160
+      },
+      {
+        "recipient": "spouse",
+        "employer_name": "Spouse Corp",
+        "employer_ein": "22-2222222",
+        "wages": 45000,
+        "federal_tax_withheld": 6000,
+        "state_tax_withheld": 2250,
+        "social_security_wages": 45000,
+        "social_security_tax_withheld": 2790,
+        "medicare_wages": 45000,
+        "medicare_tax_withheld": 652.5
+      }
+    ]
+  },
+  "expected": {
+    "total_wages": 125000,
+    "adjusted_gross_income": 125000,
+    "standard_deduction": 31500,
+    "taxable_income": 93500,
+    "income_tax": 10746,
+    "total_tax": 10746,
+    "total_federal_withholding": 18000,
+    "total_payments": 18000,
+    "overpayment": 7254,
+    "balance_due": 0
+  }
+}

@@ -1,0 +1,47 @@
+{
+  "metadata": {
+    "description": "Single filer, SSA-1099 only, voluntary withholding only",
+    "source": "2025 Form 1040 lines 6a, 6b, and 25b with Social Security benefits below the taxable threshold",
+    "verified_against_published_table": true
+  },
+  "input": {
+    "tax_year": 2025,
+    "filing_status": "single",
+    "primary_filer": {
+      "first_name": "Test",
+      "last_name": "Filer",
+      "ssn": "400-01-0001",
+      "date_of_birth": "1955-06-15",
+      "is_blind": false,
+      "is_dependent": false
+    },
+    "spouse": null,
+    "w2_income": [],
+    "social_security_income": [
+      {
+        "recipient": "primary",
+        "total_benefits": 36000,
+        "voluntary_withholding": 1800
+      }
+    ]
+  },
+  "expected": {
+    "total_wages": 0,
+    "total_social_security_benefits": 36000,
+    "taxable_social_security_benefits": 0,
+    "total_income": 0,
+    "adjusted_gross_income": 0,
+    "standard_deduction": 17750,
+    "taxable_income": 0,
+    "income_tax": 0,
+    "child_dependent_credit": 0,
+    "additional_child_tax_credit": 0,
+    "total_tax": 0,
+    "total_w2_federal_withholding": 0,
+    "total_social_security_withholding": 1800,
+    "total_federal_withholding": 1800,
+    "total_payments": 1800,
+    "overpayment": 1800,
+    "balance_due": 0
+  }
+}

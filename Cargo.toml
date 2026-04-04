@@ -1,0 +1,24 @@
+[workspace]
+resolver = "2"
+members = [
+    "crates/taxvault-core",
+    "crates/taxvault-engine",
+    "crates/taxvault-forms",
+    "crates/taxvault-loader",
+    "crates/taxvault-wasm",
+]
+
+[workspace.package]
+edition = "2021"
+version = "0.1.0"
+description = "Offline federal tax estimate engine and browser UI for a narrow 2025 filing slice."
+readme = "README.md"
+
+[workspace.dependencies]
+rust_decimal = "1"
+zeroize = { version = "1", features = ["derive"] }
+thiserror = "2"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+toml = "0.8"
+csv = "1"

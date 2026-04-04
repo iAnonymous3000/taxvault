@@ -1,0 +1,11 @@
+[package]
+name = "taxvault-core"
+edition.workspace = true
+version.workspace = true
+description.workspace = true
+readme.workspace = true
+
+[dependencies]
+rust_decimal = { workspace = true }
+zeroize = { workspace = true }
+thiserror = { workspace = true }

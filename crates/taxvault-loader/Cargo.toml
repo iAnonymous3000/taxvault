@@ -1,0 +1,20 @@
+[package]
+name = "taxvault-loader"
+edition.workspace = true
+version.workspace = true
+description.workspace = true
+readme.workspace = true
+
+[dependencies]
+taxvault-core = { path = "../taxvault-core" }
+taxvault-engine = { path = "../taxvault-engine" }
+rust_decimal = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+toml = { workspace = true }
+csv = { workspace = true }
+thiserror = { workspace = true }
+
+[dev-dependencies]
+taxvault-forms = { path = "../taxvault-forms" }
+serde_json = { workspace = true }

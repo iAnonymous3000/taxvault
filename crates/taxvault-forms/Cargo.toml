@@ -1,0 +1,12 @@
+[package]
+name = "taxvault-forms"
+edition.workspace = true
+version.workspace = true
+description.workspace = true
+readme.workspace = true
+
+[dependencies]
+taxvault-core = { path = "../taxvault-core" }
+taxvault-engine = { path = "../taxvault-engine" }
+rust_decimal = { workspace = true }
+serde = { workspace = true }

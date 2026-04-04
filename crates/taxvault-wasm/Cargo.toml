@@ -1,0 +1,19 @@
+[package]
+name = "taxvault-wasm"
+edition.workspace = true
+version.workspace = true
+description.workspace = true
+readme.workspace = true
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+taxvault-core = { path = "../taxvault-core" }
+taxvault-engine = { path = "../taxvault-engine" }
+taxvault-forms = { path = "../taxvault-forms" }
+taxvault-loader = { path = "../taxvault-loader" }
+rust_decimal = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+wasm-bindgen = "0.2"

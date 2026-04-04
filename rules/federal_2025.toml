@@ -1,0 +1,181 @@
+age_threshold = "1961-01-02"
+
+[meta]
+tax_year = 2025
+jurisdiction = "federal"
+version = "1.0.0"
+effective_date = "2025-01-01"
+
+[standard_deduction]
+single = 15750
+married_filing_jointly = 31500
+head_of_household = 23625
+additional_age_or_blind_single = 2000
+additional_age_or_blind_married = 1600
+
+[qualified_dividends]
+zero_rate_threshold_single = 48350
+zero_rate_threshold_married_filing_jointly = 96700
+zero_rate_threshold_head_of_household = 64750
+fifteen_rate_threshold_single = 533400
+fifteen_rate_threshold_married_filing_jointly = 600050
+fifteen_rate_threshold_head_of_household = 566700
+
+[child_tax_credit]
+qualifying_child_credit = 2200
+other_dependent_credit = 500
+refundable_credit_per_child = 1700
+phaseout_threshold_married_filing_jointly = 400000
+phaseout_threshold_other = 200000
+phaseout_increment = 1000
+phaseout_rate = 0.05
+refundable_earned_income_threshold = 2500
+refundable_withholding_floor = 5100
+
+[social_security]
+wage_base = 176100
+tax_rate = 0.062
+benefits_50_threshold_single = 25000
+benefits_50_threshold_married_filing_jointly = 32000
+benefits_85_threshold_single = 34000
+benefits_85_threshold_married_filing_jointly = 44000
+
+[medicare]
+tax_rate = 0.0145
+additional_rate = 0.009
+additional_threshold_single = 200000
+additional_threshold_mfj = 250000
+employer_withholding_threshold = 200000
+
+[[tax_brackets.single]]
+min = 0
+max = 11925
+rate = 0.10
+
+[[tax_brackets.single]]
+min = 11925
+max = 48475
+rate = 0.12
+
+[[tax_brackets.single]]
+min = 48475
+max = 103350
+rate = 0.22
+
+[[tax_brackets.single]]
+min = 103350
+max = 197300
+rate = 0.24
+
+[[tax_brackets.single]]
+min = 197300
+max = 250525
+rate = 0.32
+
+[[tax_brackets.single]]
+min = 250525
+max = 626350
+rate = 0.35
+
+[[tax_brackets.single]]
+min = 626350
+rate = 0.37
+
+[[tax_brackets.married_filing_jointly]]
+min = 0
+max = 23850
+rate = 0.10
+
+[[tax_brackets.married_filing_jointly]]
+min = 23850
+max = 96950
+rate = 0.12
+
+[[tax_brackets.married_filing_jointly]]
+min = 96950
+max = 206700
+rate = 0.22
+
+[[tax_brackets.married_filing_jointly]]
+min = 206700
+max = 394600
+rate = 0.24
+
+[[tax_brackets.married_filing_jointly]]
+min = 394600
+max = 501050
+rate = 0.32
+
+[[tax_brackets.married_filing_jointly]]
+min = 501050
+max = 751600
+rate = 0.35
+
+[[tax_brackets.married_filing_jointly]]
+min = 751600
+rate = 0.37
+
+[[tax_brackets.head_of_household]]
+min = 0
+max = 17000
+rate = 0.10
+
+[[tax_brackets.head_of_household]]
+min = 17000
+max = 64850
+rate = 0.12
+
+[[tax_brackets.head_of_household]]
+min = 64850
+max = 103350
+rate = 0.22
+
+[[tax_brackets.head_of_household]]
+min = 103350
+max = 197300
+rate = 0.24
+
+[[tax_brackets.head_of_household]]
+min = 197300
+max = 250500
+rate = 0.32
+
+[[tax_brackets.head_of_household]]
+min = 250500
+max = 626350
+rate = 0.35
+
+[[tax_brackets.head_of_household]]
+min = 626350
+rate = 0.37
+
+# Test vectors for self-validation on assembly.
+# Only vectors that use bracket computation (>= $100k) can self-validate
+# without a verified tax table.
+
+[[test_vectors]]
+description = "Single filer, $150k wages, bracket computation"
+filing_status = "single"
+total_wages = 150000
+federal_withholding = 30000
+expected_agi = 150000
+expected_taxable_income = 134250
+expected_tax = 25067
+
+[[test_vectors]]
+description = "HOH, $150k wages, bracket computation"
+filing_status = "head_of_household"
+total_wages = 150000
+federal_withholding = 25000
+expected_agi = 150000
+expected_taxable_income = 126375
+expected_tax = 21438
+
+[[test_vectors]]
+description = "MFJ, $200k combined wages, bracket computation"
+filing_status = "married_filing_jointly"
+total_wages = 200000
+federal_withholding = 35000
+expected_agi = 200000
+expected_taxable_income = 168500
+expected_tax = 26898

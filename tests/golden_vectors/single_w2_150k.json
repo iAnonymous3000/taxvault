@@ -1,0 +1,47 @@
+{
+  "metadata": {
+    "description": "Single filer, one W-2, $150,000 wages",
+    "source": "Tax Computation Worksheet, deterministic from bracket schedule",
+    "verified_against_published_table": false,
+    "expected_tax_value": 25067
+  },
+  "input": {
+    "tax_year": 2025,
+    "filing_status": "single",
+    "primary_filer": {
+      "first_name": "Test",
+      "last_name": "Filer",
+      "ssn": "400-01-0001",
+      "date_of_birth": "1990-06-15",
+      "is_blind": false,
+      "is_dependent": false
+    },
+    "spouse": null,
+    "w2_income": [
+      {
+        "recipient": "primary",
+        "employer_name": "Big Corp",
+        "employer_ein": "98-7654321",
+        "wages": 150000,
+        "federal_tax_withheld": 30000,
+        "state_tax_withheld": 7500,
+        "social_security_wages": 150000,
+        "social_security_tax_withheld": 9300,
+        "medicare_wages": 150000,
+        "medicare_tax_withheld": 2175
+      }
+    ]
+  },
+  "expected": {
+    "total_wages": 150000,
+    "adjusted_gross_income": 150000,
+    "standard_deduction": 15750,
+    "taxable_income": 134250,
+    "income_tax": 25067,
+    "total_tax": 25067,
+    "total_federal_withholding": 30000,
+    "total_payments": 30000,
+    "overpayment": 4933,
+    "balance_due": 0
+  }
+}
