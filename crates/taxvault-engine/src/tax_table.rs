@@ -15,16 +15,26 @@ pub struct TaxTable {
 
 impl TaxTable {
     pub fn lookup(&self, taxable_income: Decimal, status: &FilingStatus) -> Option<Decimal> {
-        for row in &self.rows {
-            if taxable_income >= row.income_at_least && taxable_income < row.income_less_than {
-                return Some(match status {
-                    FilingStatus::Single => row.tax_single,
-                    FilingStatus::MarriedFilingJointly => row.tax_mfj,
-                    FilingStatus::HeadOfHousehold => row.tax_hoh,
-                });
-            }
-        }
-        None
+        // Binary search: rows are sorted and contiguous by income_at_least.
+        let idx = self
+            .rows
+            .binary_search_by(|row| {
+                if taxable_income < row.income_at_least {
+                    std::cmp::Ordering::Greater
+                } else if taxable_income >= row.income_less_than {
+                    std::cmp::Ordering::Less
+                } else {
+                    std::cmp::Ordering::Equal
+                }
+            })
+            .ok()?;
+
+        let row = &self.rows[idx];
+        Some(match status {
+            FilingStatus::Single => row.tax_single,
+            FilingStatus::MarriedFilingJointly => row.tax_mfj,
+            FilingStatus::HeadOfHousehold => row.tax_hoh,
+        })
     }
 }
 

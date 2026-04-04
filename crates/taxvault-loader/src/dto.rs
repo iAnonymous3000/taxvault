@@ -19,7 +19,7 @@ pub struct TaxFactsDto {
     pub primary_filer: FilerInfoDto,
     pub spouse: Option<FilerInfoDto>,
     pub dependents: Option<Vec<DependentDto>>,
-    pub w2_income: Vec<W2IncomeDto>,
+    pub w2_income: Option<Vec<W2IncomeDto>>,
     pub interest_income: Option<Vec<InterestIncomeDto>>,
     pub dividend_income: Option<Vec<DividendIncomeDto>>,
     pub social_security_income: Option<Vec<SocialSecurityIncomeDto>>,

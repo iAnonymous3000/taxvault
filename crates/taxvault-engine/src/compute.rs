@@ -626,7 +626,7 @@ fn is_qualifying_child(dependent: &Dependent, tax_year: u16) -> bool {
             dependent.date_of_birth.year(),
             dependent.date_of_birth.month(),
             dependent.date_of_birth.day(),
-        ) > (tax_year - 17, 12, 31)
+        ) > (tax_year.saturating_sub(17), 12, 31)
 }
 
 #[cfg(test)]

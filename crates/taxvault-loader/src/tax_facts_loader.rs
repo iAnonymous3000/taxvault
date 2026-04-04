@@ -25,6 +25,7 @@ fn convert_tax_facts(dto: TaxFactsDto) -> Result<TaxFacts, LoaderError> {
         .collect::<Result<Vec<_>, _>>()?;
     let w2_income = dto
         .w2_income
+        .unwrap_or_default()
         .into_iter()
         .map(convert_w2)
         .collect::<Result<Vec<_>, _>>()?;
@@ -201,5 +202,36 @@ mod tests {
             Err(error) => error,
         };
         assert!(matches!(error, LoaderError::JsonParse(_)));
+    }
+
+    #[test]
+    fn accepts_omitted_w2_income() {
+        let json = r#"
+        {
+          "input": {
+            "tax_year": 2025,
+            "filing_status": "single",
+            "primary_filer": {
+              "first_name": "Test",
+              "last_name": "Filer",
+              "ssn": "400-01-0001",
+              "date_of_birth": "1990-06-15",
+              "is_blind": false,
+              "is_dependent": false
+            },
+            "spouse": null,
+            "interest_income": [{
+              "recipient": "primary",
+              "payer_name": "Test Bank",
+              "taxable_interest": 100,
+              "tax_exempt_interest": 0
+            }]
+          }
+        }
+        "#;
+
+        let facts = load_tax_facts(json).expect("should accept input without w2_income");
+        assert!(facts.w2_income.is_empty());
+        assert_eq!(facts.interest_income.len(), 1);
     }
 }

@@ -109,6 +109,7 @@ impl TaxFacts {
                 FilingStatus::MarriedFilingJointly => {}
             }
 
+            validate_required_text("1099-INT payer name", &interest.payer_name, &mut errors);
             validate_interest_amounts(interest, &mut errors);
         }
 
@@ -124,6 +125,7 @@ impl TaxFacts {
                 FilingStatus::MarriedFilingJointly => {}
             }
 
+            validate_required_text("1099-DIV payer name", &dividend.payer_name, &mut errors);
             validate_dividend_amounts(dividend, &mut errors);
         }
 
@@ -709,6 +711,48 @@ mod tests {
             ValidationError::SpouseIncomeNotAllowed { income_source }
             if income_source == "SSA-1099"
         )));
+    }
+
+    #[test]
+    fn blank_interest_payer_rejected() {
+        let mut interest = test_interest(FilerRole::Primary);
+        interest.payer_name = "   ".into();
+        let facts = TaxFacts {
+            tax_year: 2025,
+            filing_status: FilingStatus::Single,
+            primary_filer: test_filer(),
+            spouse: None,
+            dependents: vec![],
+            w2_income: vec![],
+            interest_income: vec![interest],
+            dividend_income: vec![],
+            social_security_income: vec![],
+        };
+        let errs = facts.validate_structure().unwrap_err();
+        assert!(errs
+            .iter()
+            .any(|e| matches!(e, ValidationError::EmptyRequiredField { field } if field == "1099-INT payer name")));
+    }
+
+    #[test]
+    fn blank_dividend_payer_rejected() {
+        let mut dividend = test_dividend(FilerRole::Primary);
+        dividend.payer_name = "   ".into();
+        let facts = TaxFacts {
+            tax_year: 2025,
+            filing_status: FilingStatus::Single,
+            primary_filer: test_filer(),
+            spouse: None,
+            dependents: vec![],
+            w2_income: vec![],
+            interest_income: vec![],
+            dividend_income: vec![dividend],
+            social_security_income: vec![],
+        };
+        let errs = facts.validate_structure().unwrap_err();
+        assert!(errs
+            .iter()
+            .any(|e| matches!(e, ValidationError::EmptyRequiredField { field } if field == "1099-DIV payer name")));
     }
 
     #[test]
