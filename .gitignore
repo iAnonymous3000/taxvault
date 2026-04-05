@@ -1,5 +1,8 @@
 /target/
 /web/pkg/
+.pytest_cache/
+__pycache__/
+*.py[cod]
 
 # Local assistant / editor state
 /.claude/

@@ -13,6 +13,8 @@ edition = "2021"
 version = "0.1.0"
 description = "Offline federal tax estimate engine and browser UI for a narrow 2025 filing slice."
 readme = "README.md"
+repository = "https://github.com/iAnonymous3000/taxvault"
+license = "MPL-2.0"
 
 [workspace.dependencies]
 rust_decimal = "1"

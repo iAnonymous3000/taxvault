@@ -4,6 +4,12 @@ Tax Vault is an offline-first Rust workspace for narrow-scope 2025 federal tax e
 
 It is intentionally limited. The current product supports a small set of return types and income documents, runs entirely in the browser, and is designed for estimate workflows only.
 
+## Project Status
+
+Tax Vault is open for review and collaboration as an estimate-only project.
+
+It is not approved for a public estimate release yet. The checked-in 2025 tax table is still `machine_checked`, not `human_verified`, so the repository's own release gate remains locked until a named reviewer records signoff.
+
 ## Important Warning
 
 Tax Vault is **not** a filing product.
@@ -54,6 +60,12 @@ There is currently no OCR/import flow for local PDFs or images and no cloud docu
 - `tax-table/`: published tax table data
 - `tests/golden_vectors/`: end-to-end scenario fixtures
 - `web/`: static browser UI
+
+## Community Docs
+
+- Contribution guide: `CONTRIBUTING.md`
+- Security policy: `SECURITY.md`
+- Code of conduct: `CODE_OF_CONDUCT.md`
 
 ## Prerequisites
 
@@ -148,18 +160,8 @@ The site will be published at:
 
 Golden vectors live in `tests/golden_vectors/` and cover the currently supported return slice, including Social Security benefit taxability edge cases.
 
-## GitHub Upload Notes
+## Open Source Notes
 
-This repo is now set up with:
+The repository metadata and contributor guidance are in place for public collaboration.
 
-- a root `.gitignore`
-- line-ending and editor defaults
-- a basic GitHub Actions CI workflow
-- updated workspace metadata for crate descriptions and README inheritance
-
-Two decisions are still intentionally left to the repo owner:
-
-- the repository URL
-- the software license
-
-Choose those before making the repo public.
+The code in this repository is licensed under the Mozilla Public License 2.0. See `LICENSE`.
