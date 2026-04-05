@@ -46,14 +46,17 @@ wage_base = 176100
 tax_rate = 0.062
 benefits_50_threshold_single = 25000
 benefits_50_threshold_married_filing_jointly = 32000
+benefits_50_threshold_head_of_household = 25000
 benefits_85_threshold_single = 34000
 benefits_85_threshold_married_filing_jointly = 44000
+benefits_85_threshold_head_of_household = 34000
 
 [medicare]
 tax_rate = 0.0145
 additional_rate = 0.009
 additional_threshold_single = 200000
 additional_threshold_mfj = 250000
+additional_threshold_hoh = 200000
 employer_withholding_threshold = 200000
 
 [[tax_brackets.single]]

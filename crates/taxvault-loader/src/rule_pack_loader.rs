@@ -136,16 +136,23 @@ pub fn load_rule_pack(toml_content: &str, csv_content: &str) -> Result<RulePack,
             benefits_50_threshold_married_filing_jointly: dto
                 .social_security
                 .benefits_50_threshold_married_filing_jointly,
+            benefits_50_threshold_head_of_household: dto
+                .social_security
+                .benefits_50_threshold_head_of_household,
             benefits_85_threshold_single: dto.social_security.benefits_85_threshold_single,
             benefits_85_threshold_married_filing_jointly: dto
                 .social_security
                 .benefits_85_threshold_married_filing_jointly,
+            benefits_85_threshold_head_of_household: dto
+                .social_security
+                .benefits_85_threshold_head_of_household,
         },
         medicare: MedicareRules {
             tax_rate: dto.medicare.tax_rate,
             additional_rate: dto.medicare.additional_rate,
             additional_threshold_single: dto.medicare.additional_threshold_single,
             additional_threshold_mfj: dto.medicare.additional_threshold_mfj,
+            additional_threshold_hoh: dto.medicare.additional_threshold_hoh,
             employer_withholding_threshold: dto.medicare.employer_withholding_threshold,
         },
         age_threshold,
@@ -376,6 +383,18 @@ fn validate_rule_pack(rule_pack: &RulePack) -> Result<(), LoaderError> {
             .social_security
             .benefits_85_threshold_married_filing_jointly,
     )?;
+    validate_non_negative(
+        "social_security.benefits_50_threshold_head_of_household",
+        rule_pack
+            .social_security
+            .benefits_50_threshold_head_of_household,
+    )?;
+    validate_non_negative(
+        "social_security.benefits_85_threshold_head_of_household",
+        rule_pack
+            .social_security
+            .benefits_85_threshold_head_of_household,
+    )?;
     if rule_pack.social_security.benefits_85_threshold_single
         < rule_pack.social_security.benefits_50_threshold_single
     {
@@ -396,6 +415,18 @@ fn validate_rule_pack(rule_pack: &RulePack) -> Result<(), LoaderError> {
                 .into(),
         ));
     }
+    if rule_pack
+        .social_security
+        .benefits_85_threshold_head_of_household
+        < rule_pack
+            .social_security
+            .benefits_50_threshold_head_of_household
+    {
+        return Err(LoaderError::Validation(
+            "social_security HOH 85% threshold must be greater than or equal to the 50% threshold"
+                .into(),
+        ));
+    }
     validate_rate("medicare.tax_rate", rule_pack.medicare.tax_rate)?;
     validate_rate(
         "medicare.additional_rate",
@@ -408,6 +439,10 @@ fn validate_rule_pack(rule_pack: &RulePack) -> Result<(), LoaderError> {
     validate_non_negative(
         "medicare.additional_threshold_mfj",
         rule_pack.medicare.additional_threshold_mfj,
+    )?;
+    validate_non_negative(
+        "medicare.additional_threshold_hoh",
+        rule_pack.medicare.additional_threshold_hoh,
     )?;
     validate_non_negative(
         "medicare.employer_withholding_threshold",
@@ -646,14 +681,17 @@ mod tests {
         tax_rate = 0.062
         benefits_50_threshold_single = 25000
         benefits_50_threshold_married_filing_jointly = 32000
+        benefits_50_threshold_head_of_household = 25000
         benefits_85_threshold_single = 34000
         benefits_85_threshold_married_filing_jointly = 44000
+        benefits_85_threshold_head_of_household = 34000
 
         [medicare]
         tax_rate = 0.0145
         additional_rate = 0.009
         additional_threshold_single = 200000
         additional_threshold_mfj = 250000
+        additional_threshold_hoh = 200000
         employer_withholding_threshold = 200000
 
         [[tax_brackets.single]]
@@ -743,14 +781,17 @@ mod tests {
         tax_rate = 0.062
         benefits_50_threshold_single = 25000
         benefits_50_threshold_married_filing_jointly = 32000
+        benefits_50_threshold_head_of_household = 25000
         benefits_85_threshold_single = 34000
         benefits_85_threshold_married_filing_jointly = 44000
+        benefits_85_threshold_head_of_household = 34000
 
         [medicare]
         tax_rate = 0.0145
         additional_rate = 0.009
         additional_threshold_single = 200000
         additional_threshold_mfj = 250000
+        additional_threshold_hoh = 200000
         employer_withholding_threshold = 200000
 
         [[tax_brackets.single]]

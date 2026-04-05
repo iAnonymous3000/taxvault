@@ -1,7 +1,8 @@
 use rust_decimal::Decimal;
-use std::collections::HashSet;
+use std::collections::HashMap;
 
 use crate::error::ValidationError;
+const MAX_TEXT_FIELD_LENGTH: usize = 200;
 use crate::filer::{
     DividendIncome, FilerRole, FilingStatus, IncomeAdjustments, InterestIncome,
     SocialSecurityIncome, W2Income,
@@ -154,25 +155,29 @@ impl TaxFacts {
 }
 
 fn validate_ssn_uniqueness(facts: &TaxFacts, errors: &mut Vec<ValidationError>) {
-    let mut seen: HashSet<_> = HashSet::new();
-    let mut has_dependent_dup = false;
-
-    seen.insert(&facts.primary_filer.ssn);
+    let mut seen: HashMap<_, _> = HashMap::new();
+    seen.insert(&facts.primary_filer.ssn, "primary filer".to_string());
 
     if let Some(spouse) = &facts.spouse {
-        if !seen.insert(&spouse.ssn) {
+        if seen.contains_key(&spouse.ssn) {
             errors.push(ValidationError::DuplicateFilerSsn);
+        } else {
+            seen.insert(&spouse.ssn, "spouse".to_string());
         }
     }
 
-    for dep in &facts.dependents {
-        if !seen.insert(&dep.ssn) {
-            has_dependent_dup = true;
-        }
-    }
+    for (index, dep) in facts.dependents.iter().enumerate() {
+        let dependent_label = dependent_display_label(dep, index);
 
-    if has_dependent_dup {
-        errors.push(ValidationError::DuplicateSsn);
+        if let Some(existing_holder) = seen.get(&dep.ssn) {
+            errors.push(ValidationError::DuplicateDependentSsn {
+                dependent: dependent_label,
+                ssn: dep.ssn.masked(),
+                existing_holder: existing_holder.clone(),
+            });
+        } else {
+            seen.insert(&dep.ssn, dependent_label);
+        }
     }
 }
 
@@ -180,6 +185,20 @@ fn validate_required_text(field: &str, value: &str, errors: &mut Vec<ValidationE
     if value.trim().is_empty() {
         errors.push(ValidationError::EmptyRequiredField {
             field: field.to_string(),
+        });
+    } else if value.len() > MAX_TEXT_FIELD_LENGTH {
+        errors.push(ValidationError::FieldTooLong {
+            field: field.to_string(),
+            max_length: MAX_TEXT_FIELD_LENGTH,
+        });
+    }
+}
+
+fn validate_optional_text_length(field: &str, value: &str, errors: &mut Vec<ValidationError>) {
+    if value.len() > MAX_TEXT_FIELD_LENGTH {
+        errors.push(ValidationError::FieldTooLong {
+            field: field.to_string(),
+            max_length: MAX_TEXT_FIELD_LENGTH,
         });
     }
 }
@@ -235,6 +254,11 @@ fn validate_w2_amounts(w2: &W2Income, errors: &mut Vec<ValidationError>) {
 
 fn validate_interest_amounts(interest: &InterestIncome, errors: &mut Vec<ValidationError>) {
     let payer_label = display_payer_name(&interest.payer_name, "unnamed 1099-INT payer");
+    validate_optional_text_length(
+        &format!("1099-INT({payer_label}).payer_name"),
+        &interest.payer_name,
+        errors,
+    );
     let fields: &[(&str, &Decimal)] = &[
         ("taxable_interest", &interest.taxable_interest),
         ("tax_exempt_interest", &interest.tax_exempt_interest),
@@ -252,6 +276,11 @@ fn validate_interest_amounts(interest: &InterestIncome, errors: &mut Vec<Validat
 
 fn validate_dividend_amounts(dividend: &DividendIncome, errors: &mut Vec<ValidationError>) {
     let payer_label = display_payer_name(&dividend.payer_name, "unnamed 1099-DIV payer");
+    validate_optional_text_length(
+        &format!("1099-DIV({payer_label}).payer_name"),
+        &dividend.payer_name,
+        errors,
+    );
     let fields: &[(&str, &Decimal)] = &[
         ("ordinary_dividends", &dividend.ordinary_dividends),
         ("qualified_dividends", &dividend.qualified_dividends),
@@ -351,6 +380,22 @@ fn display_payer_name<'a>(payer_name: &'a str, fallback: &'a str) -> &'a str {
         fallback
     } else {
         trimmed
+    }
+}
+
+fn dependent_display_label(dependent: &crate::Dependent, index: usize) -> String {
+    let name = format!(
+        "{} {}",
+        dependent.first_name.trim(),
+        dependent.last_name.trim()
+    )
+    .trim()
+    .to_string();
+
+    if name.is_empty() {
+        format!("dependent {}", index + 1)
+    } else {
+        format!("dependent {} ({name})", index + 1)
     }
 }
 
@@ -669,9 +714,16 @@ mod tests {
             adjustments: IncomeAdjustments::default(),
         };
         let errs = facts.validate_structure().unwrap_err();
-        assert!(errs
-            .iter()
-            .any(|e| matches!(e, ValidationError::DuplicateSsn)));
+        assert!(errs.iter().any(|e| matches!(
+            e,
+            ValidationError::DuplicateDependentSsn {
+                dependent,
+                ssn,
+                existing_holder
+            } if dependent == "dependent 1 (Jamie Filer)"
+                && ssn == "***-**-0001"
+                && existing_holder == "primary filer"
+        )));
     }
 
     #[test]
@@ -892,6 +944,28 @@ mod tests {
         assert!(errs.iter().any(|e| matches!(
             e,
             ValidationError::SocialSecurityVoluntaryWithholdingExceedsBenefits { .. }
+        )));
+    }
+
+    #[test]
+    fn oversized_name_rejected() {
+        let mut filer = test_filer();
+        filer.first_name = "A".repeat(201);
+        let facts = TaxFacts {
+            primary_filer: filer,
+            ..facts_with_w2s(
+                FilingStatus::Single,
+                None,
+                vec![test_w2(FilerRole::Primary)],
+            )
+        };
+        let errs = facts.validate_structure().unwrap_err();
+        assert!(errs.iter().any(|e| matches!(
+            e,
+            ValidationError::FieldTooLong {
+                max_length: 200,
+                ..
+            }
         )));
     }
 }

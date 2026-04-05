@@ -110,7 +110,10 @@ impl TraceBuilder {
         input_ids: Vec<TraceNodeId>,
     ) -> TraceNodeId {
         let id = TraceNodeId(self.next_id);
-        self.next_id += 1;
+        self.next_id = self
+            .next_id
+            .checked_add(1)
+            .expect("TaxVault trace overflowed u32 node ids");
         self.nodes.push(TraceNode {
             id,
             label: label.into(),
@@ -129,5 +132,21 @@ impl TraceBuilder {
 impl Default for TraceBuilder {
     fn default() -> Self {
         Self::new()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    #[should_panic(expected = "TaxVault trace overflowed u32 node ids")]
+    fn add_panics_before_trace_id_wraparound() {
+        let mut builder = TraceBuilder {
+            nodes: Vec::new(),
+            next_id: u32::MAX,
+        };
+
+        let _ = builder.add("overflow", Decimal::ZERO, "test", vec![]);
     }
 }

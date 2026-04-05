@@ -184,26 +184,26 @@ pub struct SocialSecurityRules {
     pub tax_rate: Decimal,
     pub benefits_50_threshold_single: Decimal,
     pub benefits_50_threshold_married_filing_jointly: Decimal,
+    pub benefits_50_threshold_head_of_household: Decimal,
     pub benefits_85_threshold_single: Decimal,
     pub benefits_85_threshold_married_filing_jointly: Decimal,
+    pub benefits_85_threshold_head_of_household: Decimal,
 }
 
 impl SocialSecurityRules {
     pub fn benefits_50_threshold(&self, status: &FilingStatus) -> Decimal {
         match status {
-            FilingStatus::Single | FilingStatus::HeadOfHousehold => {
-                self.benefits_50_threshold_single
-            }
+            FilingStatus::Single => self.benefits_50_threshold_single,
             FilingStatus::MarriedFilingJointly => self.benefits_50_threshold_married_filing_jointly,
+            FilingStatus::HeadOfHousehold => self.benefits_50_threshold_head_of_household,
         }
     }
 
     pub fn benefits_85_threshold(&self, status: &FilingStatus) -> Decimal {
         match status {
-            FilingStatus::Single | FilingStatus::HeadOfHousehold => {
-                self.benefits_85_threshold_single
-            }
+            FilingStatus::Single => self.benefits_85_threshold_single,
             FilingStatus::MarriedFilingJointly => self.benefits_85_threshold_married_filing_jointly,
+            FilingStatus::HeadOfHousehold => self.benefits_85_threshold_head_of_household,
         }
     }
 }
@@ -213,16 +213,16 @@ pub struct MedicareRules {
     pub additional_rate: Decimal,
     pub additional_threshold_single: Decimal,
     pub additional_threshold_mfj: Decimal,
+    pub additional_threshold_hoh: Decimal,
     pub employer_withholding_threshold: Decimal,
 }
 
 impl MedicareRules {
     pub fn threshold_for_status(&self, status: &FilingStatus) -> Decimal {
         match status {
-            FilingStatus::Single | FilingStatus::HeadOfHousehold => {
-                self.additional_threshold_single
-            }
+            FilingStatus::Single => self.additional_threshold_single,
             FilingStatus::MarriedFilingJointly => self.additional_threshold_mfj,
+            FilingStatus::HeadOfHousehold => self.additional_threshold_hoh,
         }
     }
 }

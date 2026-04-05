@@ -2,11 +2,12 @@ use std::sync::OnceLock;
 
 use rust_decimal::Decimal;
 use serde::Serialize;
-use taxvault_core::{Dependent, DependentRelationship, FilingStatus, TaxFacts};
+use taxvault_core::{DependentRelationship, FilingStatus, TaxFacts};
 use wasm_bindgen::prelude::*;
 
 use taxvault_engine::{
-    compute, validate_supported_slice, ComputeOptions, RulePack, TaxTableVerificationStatus,
+    compute, is_qualifying_child_for_child_tax_credit, validate_supported_slice, ComputeOptions,
+    RulePack, TaxTableVerificationStatus,
 };
 use taxvault_forms::{compile_1040, FormLineMap};
 use taxvault_loader::{load_rule_pack, load_tax_facts};
@@ -390,7 +391,7 @@ fn collect_input_cautions(facts: &TaxFacts) -> Vec<String> {
     if facts
         .dependents
         .iter()
-        .any(|dependent| !is_potential_child_tax_credit_child(dependent, facts.tax_year))
+        .any(|dependent| !is_qualifying_child_for_child_tax_credit(dependent, facts.tax_year))
     {
         push_unique(
             &mut cautions,
@@ -424,27 +425,6 @@ fn collect_input_cautions(facts: &TaxFacts) -> Vec<String> {
     }
 
     cautions
-}
-
-fn is_potential_child_tax_credit_child(dependent: &Dependent, tax_year: u16) -> bool {
-    matches!(
-        dependent.relationship,
-        DependentRelationship::Son
-            | DependentRelationship::Daughter
-            | DependentRelationship::Stepchild
-            | DependentRelationship::FosterChild
-            | DependentRelationship::Sibling
-            | DependentRelationship::StepSibling
-            | DependentRelationship::HalfSibling
-            | DependentRelationship::Grandchild
-            | DependentRelationship::Niece
-            | DependentRelationship::Nephew
-    ) && dependent.months_lived_in_home > 6
-        && (
-            dependent.date_of_birth.year(),
-            dependent.date_of_birth.month(),
-            dependent.date_of_birth.day(),
-        ) > (tax_year.saturating_sub(17), 12, 31)
 }
 
 fn push_unique(items: &mut Vec<String>, message: &str) {

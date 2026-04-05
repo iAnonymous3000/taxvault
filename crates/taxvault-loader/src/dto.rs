@@ -198,8 +198,10 @@ pub struct SocialSecurityDto {
     pub tax_rate: Decimal,
     pub benefits_50_threshold_single: Decimal,
     pub benefits_50_threshold_married_filing_jointly: Decimal,
+    pub benefits_50_threshold_head_of_household: Decimal,
     pub benefits_85_threshold_single: Decimal,
     pub benefits_85_threshold_married_filing_jointly: Decimal,
+    pub benefits_85_threshold_head_of_household: Decimal,
 }
 
 #[derive(Debug, Deserialize)]
@@ -209,6 +211,7 @@ pub struct MedicareDto {
     pub additional_rate: Decimal,
     pub additional_threshold_single: Decimal,
     pub additional_threshold_mfj: Decimal,
+    pub additional_threshold_hoh: Decimal,
     pub employer_withholding_threshold: Decimal,
 }
 

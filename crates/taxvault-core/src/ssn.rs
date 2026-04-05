@@ -9,16 +9,7 @@ pub struct Ssn([u8; 9]);
 impl Ssn {
     /// Parse and validate an SSN from a string like "123-45-6789" or "123456789".
     pub fn parse(input: &str) -> Result<Self, ValidationError> {
-        let digits = parse_digits(input)?;
-        if digits.len() != 9 {
-            return Err(ValidationError::InvalidSsn {
-                reason: format!("expected 9 digits, got {}", digits.len()),
-            });
-        }
-
-        let mut buf = [0u8; 9];
-        buf.copy_from_slice(&digits);
-        let ssn = Ssn(buf);
+        let ssn = Ssn(parse_digits(input)?);
         ssn.validate()?;
         Ok(ssn)
     }
@@ -89,10 +80,10 @@ impl Ssn {
     }
 }
 
-fn parse_digits(input: &str) -> Result<Vec<u8>, ValidationError> {
+fn parse_digits(input: &str) -> Result<[u8; 9], ValidationError> {
     let bytes = input.as_bytes();
     match bytes {
-        [a, b, c, d, e, f, g, h, i] if bytes.iter().all(|byte| byte.is_ascii_digit()) => Ok(vec![
+        [a, b, c, d, e, f, g, h, i] if bytes.iter().all(|byte| byte.is_ascii_digit()) => Ok([
             digit(*a),
             digit(*b),
             digit(*c),
@@ -108,7 +99,7 @@ fn parse_digits(input: &str) -> Result<Vec<u8>, ValidationError> {
                 .iter()
                 .all(|byte| byte.is_ascii_digit()) =>
         {
-            Ok(vec![
+            Ok([
                 digit(*a),
                 digit(*b),
                 digit(*c),

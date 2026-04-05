@@ -9,6 +9,10 @@ pub struct DateYmd {
 
 impl DateYmd {
     pub fn new(year: u16, month: u8, day: u8) -> Result<Self, ValidationError> {
+        if year == 0 {
+            return Err(ValidationError::InvalidDate { year, month, day });
+        }
+
         if !(1..=12).contains(&month) {
             return Err(ValidationError::InvalidDate { year, month, day });
         }
@@ -70,6 +74,7 @@ mod tests {
 
     #[test]
     fn invalid_dates() {
+        assert!(DateYmd::new(0, 1, 1).is_err());
         assert!(DateYmd::new(2025, 0, 1).is_err());
         assert!(DateYmd::new(2025, 13, 1).is_err());
         assert!(DateYmd::new(2025, 1, 0).is_err());

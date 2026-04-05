@@ -24,6 +24,23 @@ const MAX_INTEREST_FORMS = 25;
 const MAX_SOCIAL_SECURITY_FORMS = 10;
 const MAX_DIVIDEND_FORMS = 25;
 const MAX_DEPENDENTS = 15;
+const MAX_TEXT_FIELD_LENGTH = 200;
+const DEPENDENT_RELATIONSHIP_OPTIONS = [
+  { value: "", label: "Select relationship" },
+  { value: "son", label: "Son" },
+  { value: "daughter", label: "Daughter" },
+  { value: "stepchild", label: "Stepchild" },
+  { value: "foster_child", label: "Foster child" },
+  { value: "sibling", label: "Sibling" },
+  { value: "step_sibling", label: "Step-sibling" },
+  { value: "half_sibling", label: "Half-sibling" },
+  { value: "grandchild", label: "Grandchild" },
+  { value: "niece", label: "Niece" },
+  { value: "nephew", label: "Nephew" },
+  { value: "parent", label: "Parent" },
+  { value: "grandparent", label: "Grandparent" },
+  { value: "other", label: "Other" },
+];
 const FILING_STATUS_LABELS = {
   single: "Single",
   married_filing_jointly: "Married Filing Jointly",
@@ -878,6 +895,153 @@ function canAddCard(container, maxCount, label) {
   return false;
 }
 
+function createCardSection(className, index) {
+  const card = document.createElement("section");
+  card.className = className;
+  card.dataset.index = String(index);
+  return card;
+}
+
+function createButtonElement({
+  className = "",
+  text = "",
+  type = "button",
+  attributes = {},
+} = {}) {
+  return createElement("button", {
+    className,
+    text,
+    attributes: { type, ...attributes },
+  });
+}
+
+function appendSelectOptions(select, options) {
+  options.forEach(({ value, label }) => {
+    const option = document.createElement("option");
+    option.value = value;
+    option.textContent = label;
+    select.append(option);
+  });
+
+  return select;
+}
+
+function createInputControl({
+  id,
+  className = "",
+  type = "text",
+  placeholder = "",
+  inputmode,
+  autocomplete,
+  maxlength,
+  min,
+  max,
+  step,
+} = {}) {
+  return createElement("input", {
+    className,
+    attributes: {
+      id,
+      type,
+      placeholder,
+      inputmode,
+      autocomplete,
+      maxlength,
+      min,
+      max,
+      step,
+    },
+  });
+}
+
+function createSelectControl({ id, className = "", options = [] } = {}) {
+  const select = createElement("select", {
+    className,
+    attributes: { id },
+  });
+  return appendSelectOptions(select, options);
+}
+
+function createRow(...children) {
+  const row = createElement("div", { className: "row" });
+  row.append(...children);
+  return row;
+}
+
+function createField(labelText, control, { controlId = control.id } = {}) {
+  const field = createElement("div", { className: "field" });
+  const label = createElement("label", { text: labelText });
+
+  if (controlId) {
+    label.htmlFor = controlId;
+  }
+
+  field.append(label, control);
+  return field;
+}
+
+function createRecipientOptions() {
+  const options = [{ value: "primary", label: "Primary Filer" }];
+
+  if (state.filingStatus === "married_filing_jointly") {
+    options.push({ value: "spouse", label: "Spouse" });
+  }
+
+  return options;
+}
+
+function createRecipientSelect(id, className) {
+  return createSelectControl({
+    id,
+    className,
+    options: createRecipientOptions(),
+  });
+}
+
+function createMoneyInput({ id, className, placeholder }) {
+  return createInputControl({
+    id,
+    className,
+    type: "text",
+    inputmode: "decimal",
+    autocomplete: "off",
+    placeholder,
+  });
+}
+
+function createCardHeader(title, removeButtonClass) {
+  const header = createElement("div", { className: "w2-card-header" });
+  header.append(
+    createElement("h3", { text: title }),
+    createButtonElement({ className: `btn-ghost ${removeButtonClass}`, text: "Remove" })
+  );
+  return header;
+}
+
+function createSsnField(inputId, inputClass) {
+  const wrapper = createElement("div", { className: "ssn-field" });
+  const input = createInputControl({
+    id: inputId,
+    className: inputClass,
+    type: "password",
+    inputmode: "numeric",
+    autocomplete: "off",
+    maxlength: 11,
+    placeholder: "123-45-6789",
+  });
+  const toggle = createButtonElement({
+    className: "ssn-toggle",
+    text: "Show",
+    attributes: {
+      "aria-controls": inputId,
+      "aria-pressed": "false",
+    },
+  });
+
+  wrapper.append(input, toggle);
+  return wrapper;
+}
+
 function addW2({ focusNewCard = true } = {}) {
   if (!canAddCard(els.w2Container, MAX_W2_FORMS, "W-2 forms")) {
     return null;
@@ -885,78 +1049,124 @@ function addW2({ focusNewCard = true } = {}) {
 
   state.w2Count += 1;
   const idPrefix = `w2-${state.w2Count}`;
-  const card = document.createElement("section");
-  card.className = "w2-card";
-  card.dataset.index = String(state.w2Count);
-  card.innerHTML = `
-    <div class="w2-card-header">
-      <h3>W-2 #${state.w2Count}</h3>
-      <button class="btn-ghost remove-w2-btn" type="button">Remove</button>
-    </div>
-    <div class="w2-essential">
-      <div class="row">
-        <div class="field">
-          <label for="${idPrefix}-employer">Employer Name</label>
-          <input id="${idPrefix}-employer" class="w2-employer" placeholder="Company Inc.">
-        </div>
-        <div class="field">
-          <label for="${idPrefix}-recipient">Recipient</label>
-          <select id="${idPrefix}-recipient" class="w2-recipient income-recipient">
-            <option value="primary">Primary Filer</option>
-            ${state.filingStatus === "married_filing_jointly" ? '<option value="spouse">Spouse</option>' : ""}
-          </select>
-        </div>
-      </div>
-      <div class="row">
-        <div class="field">
-          <label for="${idPrefix}-ein">Employer EIN</label>
-          <input id="${idPrefix}-ein" class="w2-ein" inputmode="numeric" maxlength="10" placeholder="12-3456789">
-        </div>
-        <div class="field">
-          <label for="${idPrefix}-fed-wh">Federal Tax Withheld (Box 2)</label>
-          <input id="${idPrefix}-fed-wh" type="text" class="w2-fed-wh money-input" inputmode="decimal" autocomplete="off" placeholder="0.00">
-        </div>
-      </div>
-      <div class="row">
-        <div class="field">
-          <label for="${idPrefix}-wages">Wages (Box 1)</label>
-          <input id="${idPrefix}-wages" type="text" class="w2-wages money-input" inputmode="decimal" autocomplete="off" placeholder="0.00">
-        </div>
-        <div class="field">
-          <label for="${idPrefix}-state-wh">State Tax Withheld (Box 17)</label>
-          <input id="${idPrefix}-state-wh" type="text" class="w2-state-wh money-input" inputmode="decimal" autocomplete="off" placeholder="0.00">
-        </div>
-      </div>
-    </div>
-    <div class="w2-advanced">
-      <button class="w2-advanced-toggle" type="button" aria-expanded="false">
-        <span class="arrow" aria-hidden="true">&#9654;</span>
-        Additional W-2 fields
-      </button>
-      <div class="w2-advanced-fields">
-        <div class="row">
-          <div class="field">
-            <label for="${idPrefix}-ss-wages">SS Wages (Box 3)</label>
-            <input id="${idPrefix}-ss-wages" type="text" class="w2-ss-wages money-input" inputmode="decimal" autocomplete="off" placeholder="Same as wages">
-          </div>
-          <div class="field">
-            <label for="${idPrefix}-ss-wh">SS Tax Withheld (Box 4)</label>
-            <input id="${idPrefix}-ss-wh" type="text" class="w2-ss-wh money-input" inputmode="decimal" autocomplete="off" placeholder="0.00">
-          </div>
-        </div>
-        <div class="row">
-          <div class="field">
-            <label for="${idPrefix}-med-wages">Medicare Wages (Box 5)</label>
-            <input id="${idPrefix}-med-wages" type="text" class="w2-med-wages money-input" inputmode="decimal" autocomplete="off" placeholder="Same as wages">
-          </div>
-          <div class="field">
-            <label for="${idPrefix}-med-wh">Medicare Tax (Box 6)</label>
-            <input id="${idPrefix}-med-wh" type="text" class="w2-med-wh money-input" inputmode="decimal" autocomplete="off" placeholder="0.00">
-          </div>
-        </div>
-      </div>
-    </div>
-  `;
+  const card = createCardSection("w2-card", state.w2Count);
+  const essential = createElement("div", { className: "w2-essential" });
+  essential.append(
+    createRow(
+      createField(
+        "Employer Name",
+        createInputControl({
+          id: `${idPrefix}-employer`,
+          className: "w2-employer",
+          placeholder: "Company Inc.",
+          maxlength: MAX_TEXT_FIELD_LENGTH,
+        })
+      ),
+      createField(
+        "Recipient",
+        createRecipientSelect(`${idPrefix}-recipient`, "w2-recipient income-recipient")
+      )
+    ),
+    createRow(
+      createField(
+        "Employer EIN",
+        createInputControl({
+          id: `${idPrefix}-ein`,
+          className: "w2-ein",
+          inputmode: "numeric",
+          maxlength: 10,
+          placeholder: "12-3456789",
+        })
+      ),
+      createField(
+        "Federal Tax Withheld (Box 2)",
+        createMoneyInput({
+          id: `${idPrefix}-fed-wh`,
+          className: "w2-fed-wh money-input",
+          placeholder: "0.00",
+        })
+      )
+    ),
+    createRow(
+      createField(
+        "Wages (Box 1)",
+        createMoneyInput({
+          id: `${idPrefix}-wages`,
+          className: "w2-wages money-input",
+          placeholder: "0.00",
+        })
+      ),
+      createField(
+        "State Tax Withheld (Box 17)",
+        createMoneyInput({
+          id: `${idPrefix}-state-wh`,
+          className: "w2-state-wh money-input",
+          placeholder: "0.00",
+        })
+      )
+    )
+  );
+
+  const advancedToggle = createButtonElement({
+    className: "w2-advanced-toggle",
+    attributes: { "aria-expanded": "false" },
+  });
+  const arrow = createElement("span", {
+    className: "arrow",
+    attributes: { "aria-hidden": "true" },
+  });
+  arrow.textContent = String.fromCharCode(9654);
+  advancedToggle.append(arrow, document.createTextNode(" Additional W-2 fields"));
+
+  const advancedFields = createElement("div", { className: "w2-advanced-fields" });
+  advancedFields.append(
+    createRow(
+      createField(
+        "SS Wages (Box 3)",
+        createMoneyInput({
+          id: `${idPrefix}-ss-wages`,
+          className: "w2-ss-wages money-input",
+          placeholder: "Same as wages",
+        })
+      ),
+      createField(
+        "SS Tax Withheld (Box 4)",
+        createMoneyInput({
+          id: `${idPrefix}-ss-wh`,
+          className: "w2-ss-wh money-input",
+          placeholder: "0.00",
+        })
+      )
+    ),
+    createRow(
+      createField(
+        "Medicare Wages (Box 5)",
+        createMoneyInput({
+          id: `${idPrefix}-med-wages`,
+          className: "w2-med-wages money-input",
+          placeholder: "Same as wages",
+        })
+      ),
+      createField(
+        "Medicare Tax (Box 6)",
+        createMoneyInput({
+          id: `${idPrefix}-med-wh`,
+          className: "w2-med-wh money-input",
+          placeholder: "0.00",
+        })
+      )
+    )
+  );
+
+  const advanced = createElement("div", { className: "w2-advanced" });
+  advanced.append(advancedToggle, advancedFields);
+
+  card.append(
+    createCardHeader(`W-2 #${state.w2Count}`, "remove-w2-btn"),
+    createReferenceZone("W-2"),
+    essential,
+    advanced
+  );
 
   card.querySelector(".remove-w2-btn").addEventListener("click", () => removeW2(card));
   card.querySelector(".w2-advanced-toggle").addEventListener("click", () => toggleAdvanced(card));
@@ -964,9 +1174,6 @@ function addW2({ focusNewCard = true } = {}) {
     event.target.value = formatDigits(event.target.value, [2, 7]);
   });
   bindMoneyFields(card);
-
-  const referenceZone = createReferenceZone("W-2");
-  card.insertBefore(referenceZone, card.querySelector(".w2-essential"));
 
   els.w2Container.append(card);
   updateRemoveButtons();
@@ -987,40 +1194,38 @@ function addSocialSecurity({ focusNewCard = true } = {}) {
 
   state.socialSecurityCount += 1;
   const idPrefix = `ssa-${state.socialSecurityCount}`;
-  const card = document.createElement("section");
-  card.className = "w2-card ssa-card";
-  card.dataset.index = String(state.socialSecurityCount);
-  card.innerHTML = `
-    <div class="w2-card-header">
-      <h3>SSA-1099 #${state.socialSecurityCount}</h3>
-      <button class="btn-ghost remove-ssa-btn" type="button">Remove</button>
-    </div>
-    <div class="row">
-      <div class="field">
-        <label for="${idPrefix}-recipient">Recipient</label>
-        <select id="${idPrefix}-recipient" class="income-recipient ssa-recipient">
-          <option value="primary">Primary Filer</option>
-          ${state.filingStatus === "married_filing_jointly" ? '<option value="spouse">Spouse</option>' : ""}
-        </select>
-      </div>
-      <div class="field">
-        <label for="${idPrefix}-benefits">Total Benefits (Box 5)</label>
-        <input id="${idPrefix}-benefits" type="text" class="ssa-benefits money-input" inputmode="decimal" autocomplete="off" placeholder="0.00">
-      </div>
-    </div>
-    <div class="row">
-      <div class="field">
-        <label for="${idPrefix}-withholding">Voluntary Federal Tax Withheld (Box 6)</label>
-        <input id="${idPrefix}-withholding" type="text" class="ssa-withholding money-input" inputmode="decimal" autocomplete="off" placeholder="0.00">
-      </div>
-    </div>
-  `;
+  const card = createCardSection("w2-card ssa-card", state.socialSecurityCount);
+  card.append(
+    createCardHeader(`SSA-1099 #${state.socialSecurityCount}`, "remove-ssa-btn"),
+    createReferenceZone("SSA-1099"),
+    createRow(
+      createField(
+        "Recipient",
+        createRecipientSelect(`${idPrefix}-recipient`, "income-recipient ssa-recipient")
+      ),
+      createField(
+        "Total Benefits (Box 5)",
+        createMoneyInput({
+          id: `${idPrefix}-benefits`,
+          className: "ssa-benefits money-input",
+          placeholder: "0.00",
+        })
+      )
+    ),
+    createRow(
+      createField(
+        "Voluntary Federal Tax Withheld (Box 6)",
+        createMoneyInput({
+          id: `${idPrefix}-withholding`,
+          className: "ssa-withholding money-input",
+          placeholder: "0.00",
+        })
+      )
+    )
+  );
 
   card.querySelector(".remove-ssa-btn").addEventListener("click", () => removeSocialSecurity(card));
   bindMoneyFields(card);
-
-  const referenceZone = createReferenceZone("SSA-1099");
-  card.insertBefore(referenceZone, card.querySelector(".row"));
 
   els.socialSecurityContainer.append(card);
   updateSocialSecurityRemoveButtons();
@@ -1041,46 +1246,49 @@ function addInterest({ focusNewCard = true } = {}) {
 
   state.interestCount += 1;
   const idPrefix = `int-${state.interestCount}`;
-  const card = document.createElement("section");
-  card.className = "w2-card";
-  card.dataset.index = String(state.interestCount);
-  card.innerHTML = `
-    <div class="w2-card-header">
-      <h3>1099-INT #${state.interestCount}</h3>
-      <button class="btn-ghost remove-interest-btn" type="button">Remove</button>
-    </div>
-    <div class="row">
-      <div class="field">
-        <label for="${idPrefix}-payer">Institution Name (Optional)</label>
-        <input id="${idPrefix}-payer" class="interest-payer" placeholder="Summit Bank">
-      </div>
-      <div class="field">
-        <label for="${idPrefix}-recipient">Recipient</label>
-        <select id="${idPrefix}-recipient" class="income-recipient interest-recipient">
-          <option value="primary">Primary Filer</option>
-          ${state.filingStatus === "married_filing_jointly" ? '<option value="spouse">Spouse</option>' : ""}
-        </select>
-      </div>
-    </div>
-    <div class="row">
-      <div class="field">
-        <label for="${idPrefix}-taxable">Taxable Interest (Box 1)</label>
-        <input id="${idPrefix}-taxable" type="text" class="interest-taxable money-input" inputmode="decimal" autocomplete="off" placeholder="0.00">
-      </div>
-      <div class="field">
-        <label for="${idPrefix}-tax-exempt">Tax-Exempt Interest (Box 8)</label>
-        <input id="${idPrefix}-tax-exempt" type="text" class="interest-tax-exempt money-input" inputmode="decimal" autocomplete="off" placeholder="0.00">
-      </div>
-    </div>
-  `;
+  const card = createCardSection("w2-card", state.interestCount);
+  card.append(
+    createCardHeader(`1099-INT #${state.interestCount}`, "remove-interest-btn"),
+    createReferenceZone("1099-INT"),
+    createRow(
+      createField(
+        "Institution Name (Optional)",
+        createInputControl({
+          id: `${idPrefix}-payer`,
+          className: "interest-payer",
+          placeholder: "Summit Bank",
+          maxlength: MAX_TEXT_FIELD_LENGTH,
+        })
+      ),
+      createField(
+        "Recipient",
+        createRecipientSelect(`${idPrefix}-recipient`, "income-recipient interest-recipient")
+      )
+    ),
+    createRow(
+      createField(
+        "Taxable Interest (Box 1)",
+        createMoneyInput({
+          id: `${idPrefix}-taxable`,
+          className: "interest-taxable money-input",
+          placeholder: "0.00",
+        })
+      ),
+      createField(
+        "Tax-Exempt Interest (Box 8)",
+        createMoneyInput({
+          id: `${idPrefix}-tax-exempt`,
+          className: "interest-tax-exempt money-input",
+          placeholder: "0.00",
+        })
+      )
+    )
+  );
 
   card
     .querySelector(".remove-interest-btn")
     .addEventListener("click", () => removeInterest(card));
   bindMoneyFields(card);
-
-  const referenceZone = createReferenceZone("1099-INT");
-  card.insertBefore(referenceZone, card.querySelector(".row"));
 
   els.interestContainer.append(card);
   updateInterestRemoveButtons();
@@ -1101,46 +1309,49 @@ function addDividend({ focusNewCard = true } = {}) {
 
   state.dividendCount += 1;
   const idPrefix = `div-${state.dividendCount}`;
-  const card = document.createElement("section");
-  card.className = "w2-card";
-  card.dataset.index = String(state.dividendCount);
-  card.innerHTML = `
-    <div class="w2-card-header">
-      <h3>1099-DIV #${state.dividendCount}</h3>
-      <button class="btn-ghost remove-dividend-btn" type="button">Remove</button>
-    </div>
-    <div class="row">
-      <div class="field">
-        <label for="${idPrefix}-payer">Institution Name (Optional)</label>
-        <input id="${idPrefix}-payer" class="dividend-payer" placeholder="North Brokerage">
-      </div>
-      <div class="field">
-        <label for="${idPrefix}-recipient">Recipient</label>
-        <select id="${idPrefix}-recipient" class="income-recipient dividend-recipient">
-          <option value="primary">Primary Filer</option>
-          ${state.filingStatus === "married_filing_jointly" ? '<option value="spouse">Spouse</option>' : ""}
-        </select>
-      </div>
-    </div>
-    <div class="row">
-      <div class="field">
-        <label for="${idPrefix}-ordinary">Ordinary Dividends (Box 1a)</label>
-        <input id="${idPrefix}-ordinary" type="text" class="dividend-ordinary money-input" inputmode="decimal" autocomplete="off" placeholder="0.00">
-      </div>
-      <div class="field">
-        <label for="${idPrefix}-qualified">Qualified Dividends (Box 1b)</label>
-        <input id="${idPrefix}-qualified" type="text" class="dividend-qualified money-input" inputmode="decimal" autocomplete="off" placeholder="0.00">
-      </div>
-    </div>
-  `;
+  const card = createCardSection("w2-card", state.dividendCount);
+  card.append(
+    createCardHeader(`1099-DIV #${state.dividendCount}`, "remove-dividend-btn"),
+    createReferenceZone("1099-DIV"),
+    createRow(
+      createField(
+        "Institution Name (Optional)",
+        createInputControl({
+          id: `${idPrefix}-payer`,
+          className: "dividend-payer",
+          placeholder: "North Brokerage",
+          maxlength: MAX_TEXT_FIELD_LENGTH,
+        })
+      ),
+      createField(
+        "Recipient",
+        createRecipientSelect(`${idPrefix}-recipient`, "income-recipient dividend-recipient")
+      )
+    ),
+    createRow(
+      createField(
+        "Ordinary Dividends (Box 1a)",
+        createMoneyInput({
+          id: `${idPrefix}-ordinary`,
+          className: "dividend-ordinary money-input",
+          placeholder: "0.00",
+        })
+      ),
+      createField(
+        "Qualified Dividends (Box 1b)",
+        createMoneyInput({
+          id: `${idPrefix}-qualified`,
+          className: "dividend-qualified money-input",
+          placeholder: "0.00",
+        })
+      )
+    )
+  );
 
   card
     .querySelector(".remove-dividend-btn")
     .addEventListener("click", () => removeDividend(card));
   bindMoneyFields(card);
-
-  const referenceZone = createReferenceZone("1099-DIV");
-  card.insertBefore(referenceZone, card.querySelector(".row"));
 
   els.dividendContainer.append(card);
   updateDividendRemoveButtons();
@@ -1161,81 +1372,67 @@ function addDependent({ focusNewCard = true } = {}) {
 
   state.dependentCount += 1;
   const idPrefix = `dep-${state.dependentCount}`;
-  const card = document.createElement("section");
-  card.className = "w2-card dependent-card";
-  card.dataset.index = String(state.dependentCount);
-  card.innerHTML = `
-    <div class="w2-card-header">
-      <h3>Dependent #${state.dependentCount}</h3>
-      <button class="btn-ghost remove-dependent-btn" type="button">Remove</button>
-    </div>
-    <div class="row">
-      <div class="field">
-        <label for="${idPrefix}-first">First Name</label>
-        <input id="${idPrefix}-first" class="dep-first" placeholder="Jamie">
-      </div>
-      <div class="field">
-        <label for="${idPrefix}-last">Last Name</label>
-        <input id="${idPrefix}-last" class="dep-last" placeholder="Doe">
-      </div>
-    </div>
-    <div class="row">
-      <div class="field">
-        <label for="${idPrefix}-ssn">Social Security Number</label>
-        <div class="ssn-field">
-          <input
-            id="${idPrefix}-ssn"
-            class="dep-ssn ssn-input"
-            type="password"
-            autocomplete="off"
-            inputmode="numeric"
-            maxlength="11"
-            placeholder="123-45-6789"
-          >
-          <button class="ssn-toggle" type="button" aria-controls="${idPrefix}-ssn" aria-pressed="false">
-            Show
-          </button>
-        </div>
-      </div>
-      <div class="field">
-        <label for="${idPrefix}-dob">Date of Birth</label>
-        <input id="${idPrefix}-dob" type="date" class="dep-dob">
-      </div>
-    </div>
-    <div class="row">
-      <div class="field">
-        <label for="${idPrefix}-relationship">Relationship</label>
-        <select id="${idPrefix}-relationship" class="dep-relationship">
-          <option value="">Select relationship</option>
-          <option value="son">Son</option>
-          <option value="daughter">Daughter</option>
-          <option value="stepchild">Stepchild</option>
-          <option value="foster_child">Foster child</option>
-          <option value="sibling">Sibling</option>
-          <option value="step_sibling">Step-sibling</option>
-          <option value="half_sibling">Half-sibling</option>
-          <option value="grandchild">Grandchild</option>
-          <option value="niece">Niece</option>
-          <option value="nephew">Nephew</option>
-          <option value="parent">Parent</option>
-          <option value="grandparent">Grandparent</option>
-          <option value="other">Other</option>
-        </select>
-      </div>
-      <div class="field">
-        <label for="${idPrefix}-months">Months Lived in Home</label>
-        <input
-          id="${idPrefix}-months"
-          type="number"
-          class="dep-months"
-          min="0"
-          max="12"
-          step="1"
-          placeholder="12"
-        >
-      </div>
-    </div>
-  `;
+  const card = createCardSection("w2-card dependent-card", state.dependentCount);
+  card.append(
+    createCardHeader(`Dependent #${state.dependentCount}`, "remove-dependent-btn"),
+    createRow(
+      createField(
+        "First Name",
+        createInputControl({
+          id: `${idPrefix}-first`,
+          className: "dep-first",
+          placeholder: "Jamie",
+          maxlength: MAX_TEXT_FIELD_LENGTH,
+        })
+      ),
+      createField(
+        "Last Name",
+        createInputControl({
+          id: `${idPrefix}-last`,
+          className: "dep-last",
+          placeholder: "Doe",
+          maxlength: MAX_TEXT_FIELD_LENGTH,
+        })
+      )
+    ),
+    createRow(
+      createField(
+        "Social Security Number",
+        createSsnField(`${idPrefix}-ssn`, "dep-ssn ssn-input"),
+        { controlId: `${idPrefix}-ssn` }
+      ),
+      createField(
+        "Date of Birth",
+        createInputControl({
+          id: `${idPrefix}-dob`,
+          className: "dep-dob",
+          type: "date",
+        })
+      )
+    ),
+    createRow(
+      createField(
+        "Relationship",
+        createSelectControl({
+          id: `${idPrefix}-relationship`,
+          className: "dep-relationship",
+          options: DEPENDENT_RELATIONSHIP_OPTIONS,
+        })
+      ),
+      createField(
+        "Months Lived in Home",
+        createInputControl({
+          id: `${idPrefix}-months`,
+          className: "dep-months",
+          type: "number",
+          min: 0,
+          max: 12,
+          step: 1,
+          placeholder: "12",
+        })
+      )
+    )
+  );
 
   card.querySelector(".remove-dependent-btn").addEventListener("click", () => removeDependent(card));
   bindSsnFields(card);
@@ -2604,12 +2801,18 @@ function clearAllData() {
   showDisclaimerGate();
 }
 
-function createElement(tagName, { className = "", text = "" } = {}) {
+function createElement(tagName, { className = "", text = "", attributes = {} } = {}) {
   const element = document.createElement(tagName);
 
   if (className) {
     element.className = className;
   }
+
+  Object.entries(attributes).forEach(([name, value]) => {
+    if (value !== undefined && value !== null && value !== "") {
+      element.setAttribute(name, String(value));
+    }
+  });
 
   if (text) {
     element.textContent = text;

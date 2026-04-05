@@ -66,11 +66,18 @@ pub enum ValidationError {
     #[error("months_lived_in_home must be 0-12 for dependent {name}")]
     InvalidMonthsLived { name: String },
 
-    #[error("duplicate SSN found among filers and dependents")]
-    DuplicateSsn,
+    #[error("duplicate SSN for {dependent}: {ssn} is already used by {existing_holder}")]
+    DuplicateDependentSsn {
+        dependent: String,
+        ssn: String,
+        existing_holder: String,
+    },
 
     #[error("invalid EIN format: {ein} (expected ##-#######)")]
     InvalidEin { ein: String },
+
+    #[error("{field} exceeds maximum length of {max_length} characters")]
+    FieldTooLong { field: String, max_length: usize },
 
     #[error("qualified dividends ({qualified}) exceed ordinary dividends ({ordinary}) on 1099-DIV from {payer}")]
     QualifiedDividendsExceedOrdinaryDividends {

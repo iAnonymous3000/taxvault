@@ -666,7 +666,7 @@ fn compute_child_tax_credit(
     let qualifying_children = facts
         .dependents
         .iter()
-        .filter(|dep| is_qualifying_child(dep, facts.tax_year))
+        .filter(|dep| is_qualifying_child_for_child_tax_credit(dep, facts.tax_year))
         .count();
     let other_dependents = facts.dependents.len().saturating_sub(qualifying_children);
 
@@ -723,7 +723,11 @@ fn compute_child_tax_credit(
     }
 }
 
-fn is_qualifying_child(dependent: &Dependent, tax_year: u16) -> bool {
+/// Returns true when a dependent fits TaxVault's qualifying-child screen for the Child Tax Credit.
+///
+/// The age test follows the IRS "under age 17 at the end of the tax year" rule, so a child who
+/// turns 17 on December 31 does not qualify.
+pub fn is_qualifying_child_for_child_tax_credit(dependent: &Dependent, tax_year: u16) -> bool {
     matches!(
         dependent.relationship,
         DependentRelationship::Son
@@ -747,6 +751,32 @@ fn is_qualifying_child(dependent: &Dependent, tax_year: u16) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use taxvault_core::{DateYmd, Dependent, Ssn};
+
+    fn dependent_with_birth_date(year: u16, month: u8, day: u8) -> Dependent {
+        Dependent {
+            first_name: "Test".into(),
+            last_name: "Child".into(),
+            ssn: Ssn::parse("400-01-0002").unwrap(),
+            date_of_birth: DateYmd::new(year, month, day).unwrap(),
+            relationship: DependentRelationship::Daughter,
+            months_lived_in_home: 12,
+        }
+    }
+
+    #[test]
+    fn child_turning_seventeen_on_last_day_of_year_is_not_qualifying() {
+        let dependent = dependent_with_birth_date(2008, 12, 31);
+
+        assert!(!is_qualifying_child_for_child_tax_credit(&dependent, 2025));
+    }
+
+    #[test]
+    fn child_still_sixteen_at_year_end_is_qualifying() {
+        let dependent = dependent_with_birth_date(2009, 1, 1);
+
+        assert!(is_qualifying_child_for_child_tax_credit(&dependent, 2025));
+    }
 
     #[test]
     fn unverified_table_refused() {
@@ -816,14 +846,17 @@ mod tests {
                 tax_rate: Decimal::new(62, 3),
                 benefits_50_threshold_single: Decimal::from(25000),
                 benefits_50_threshold_married_filing_jointly: Decimal::from(32000),
+                benefits_50_threshold_head_of_household: Decimal::from(25000),
                 benefits_85_threshold_single: Decimal::from(34000),
                 benefits_85_threshold_married_filing_jointly: Decimal::from(44000),
+                benefits_85_threshold_head_of_household: Decimal::from(34000),
             },
             medicare: MedicareRules {
                 tax_rate: Decimal::new(145, 4),
                 additional_rate: Decimal::new(9, 3),
                 additional_threshold_single: Decimal::from(200000),
                 additional_threshold_mfj: Decimal::from(250000),
+                additional_threshold_hoh: Decimal::from(200000),
                 employer_withholding_threshold: Decimal::from(200000),
             },
             age_threshold: DateYmd::new(1961, 1, 2).unwrap(),
@@ -887,8 +920,10 @@ mod tests {
             tax_rate: Decimal::new(62, 3),
             benefits_50_threshold_single: Decimal::from(25000),
             benefits_50_threshold_married_filing_jointly: Decimal::from(32000),
+            benefits_50_threshold_head_of_household: Decimal::from(25000),
             benefits_85_threshold_single: Decimal::from(34000),
             benefits_85_threshold_married_filing_jointly: Decimal::from(44000),
+            benefits_85_threshold_head_of_household: Decimal::from(34000),
         };
 
         let taxable = compute_taxable_social_security_benefits(
@@ -952,6 +987,7 @@ mod tests {
                     additional_rate: Decimal::ZERO,
                     additional_threshold_single: Decimal::ZERO,
                     additional_threshold_mfj: Decimal::ZERO,
+                    additional_threshold_hoh: Decimal::ZERO,
                     employer_withholding_threshold: Decimal::ZERO,
                 },
                 age_threshold: taxvault_core::DateYmd::new(1961, 1, 2).unwrap(),
@@ -971,8 +1007,10 @@ mod tests {
             tax_rate: Decimal::new(62, 3),
             benefits_50_threshold_single: Decimal::from(25000),
             benefits_50_threshold_married_filing_jointly: Decimal::from(32000),
+            benefits_50_threshold_head_of_household: Decimal::from(25000),
             benefits_85_threshold_single: Decimal::from(34000),
             benefits_85_threshold_married_filing_jointly: Decimal::from(44000),
+            benefits_85_threshold_head_of_household: Decimal::from(34000),
         };
 
         let taxable = compute_taxable_social_security_benefits(
@@ -1036,6 +1074,7 @@ mod tests {
                     additional_rate: Decimal::ZERO,
                     additional_threshold_single: Decimal::ZERO,
                     additional_threshold_mfj: Decimal::ZERO,
+                    additional_threshold_hoh: Decimal::ZERO,
                     employer_withholding_threshold: Decimal::ZERO,
                 },
                 age_threshold: taxvault_core::DateYmd::new(1961, 1, 2).unwrap(),
@@ -1105,14 +1144,17 @@ mod tests {
                 tax_rate: Decimal::ZERO,
                 benefits_50_threshold_single: Decimal::ZERO,
                 benefits_50_threshold_married_filing_jointly: Decimal::ZERO,
+                benefits_50_threshold_head_of_household: Decimal::ZERO,
                 benefits_85_threshold_single: Decimal::ZERO,
                 benefits_85_threshold_married_filing_jointly: Decimal::ZERO,
+                benefits_85_threshold_head_of_household: Decimal::ZERO,
             },
             medicare: crate::rule_pack::MedicareRules {
                 tax_rate: Decimal::ZERO,
                 additional_rate: Decimal::ZERO,
                 additional_threshold_single: Decimal::ZERO,
                 additional_threshold_mfj: Decimal::ZERO,
+                additional_threshold_hoh: Decimal::ZERO,
                 employer_withholding_threshold: Decimal::ZERO,
             },
             age_threshold: taxvault_core::DateYmd::new(1961, 1, 2).unwrap(),

@@ -27,9 +27,14 @@ pub fn validate_supported_slice(
     }
 
     // 3. Excess Social Security withholding
-    for role in [FilerRole::Primary, FilerRole::Spouse] {
+    let social_security_roles: &[FilerRole] = match facts.filing_status {
+        FilingStatus::MarriedFilingJointly => &[FilerRole::Primary, FilerRole::Spouse],
+        FilingStatus::Single | FilingStatus::HeadOfHousehold => &[FilerRole::Primary],
+    };
+
+    for role in social_security_roles {
         let total_ss_withheld: Decimal = facts
-            .w2s_for_role(role)
+            .w2s_for_role(*role)
             .map(|w| w.social_security_tax_withheld)
             .sum();
         let max_supported = rules.social_security.wage_base * rules.social_security.tax_rate;
@@ -145,14 +150,17 @@ mod tests {
                 tax_rate: Decimal::new(62, 3), // 0.062
                 benefits_50_threshold_single: Decimal::from(25000),
                 benefits_50_threshold_married_filing_jointly: Decimal::from(32000),
+                benefits_50_threshold_head_of_household: Decimal::from(25000),
                 benefits_85_threshold_single: Decimal::from(34000),
                 benefits_85_threshold_married_filing_jointly: Decimal::from(44000),
+                benefits_85_threshold_head_of_household: Decimal::from(34000),
             },
             medicare: MedicareRules {
                 tax_rate: Decimal::new(145, 4),      // 0.0145
                 additional_rate: Decimal::new(9, 3), // 0.009
                 additional_threshold_single: Decimal::from(200000),
                 additional_threshold_mfj: Decimal::from(250000),
+                additional_threshold_hoh: Decimal::from(200000),
                 employer_withholding_threshold: Decimal::from(200000),
             },
             age_threshold: DateYmd::new(1961, 1, 2).unwrap(),

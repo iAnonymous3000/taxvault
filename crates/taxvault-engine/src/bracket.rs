@@ -32,7 +32,7 @@ pub fn compute_bracket_tax(
         tax += taxable_in_bracket * bracket.rate;
     }
 
-    Ok(tax)
+    Ok(tax.round_dp(0))
 }
 
 #[cfg(test)]
@@ -211,5 +211,17 @@ mod tests {
         .unwrap();
         // This should be > 0 and use the 35% bracket
         assert!(result > Decimal::ZERO);
+    }
+
+    #[test]
+    fn fractional_income_rounds_to_nearest_dollar() {
+        // $10,000.50 at 10% = $1,000.05 → rounds to $1,000
+        let result = compute_bracket_tax(
+            Decimal::new(1000050, 2),
+            &FilingStatus::Single,
+            &test_brackets(),
+        )
+        .unwrap();
+        assert_eq!(result, Decimal::from(1000));
     }
 }
