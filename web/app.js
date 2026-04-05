@@ -243,7 +243,7 @@ function focusElement(target) {
   }
 
   window.requestAnimationFrame(() => {
-    target.focus({ preventScroll: true });
+    target.focus();
   });
 }
 
@@ -1033,6 +1033,11 @@ function goToStep(step) {
     section.classList.toggle("active", section.id === `step${step}`);
   });
 
+  const showOnboarding = step === 1;
+  document.querySelectorAll(".welcome-panel, .notice-card, .trust-panel").forEach((panel) => {
+    panel.classList.toggle("hidden", !showOnboarding);
+  });
+
   updateStepIndicator();
 
   if (step === 2) {
@@ -1042,7 +1047,10 @@ function goToStep(step) {
   scheduleDraftSave();
 
   if (typeof window.scrollTo === "function") {
-    window.scrollTo({ top: 0, behavior: "smooth" });
+    const motion = window.matchMedia("(prefers-reduced-motion: reduce)").matches
+      ? "instant"
+      : "smooth";
+    window.scrollTo({ top: 0, behavior: motion });
   }
 }
 
@@ -1067,24 +1075,31 @@ function updateStepIndicator() {
 
 function validateStep1() {
   const errors = [];
+  const fieldErrors = [];
   const primary = readFilerInputs("p");
   let spouse = null;
 
   if (!primary.firstName) {
     errors.push("First name is required.");
+    fieldErrors.push({ id: "pFirst", msg: "Required" });
   }
   if (!primary.lastName) {
     errors.push("Last name is required.");
+    fieldErrors.push({ id: "pLast", msg: "Required" });
   }
   if (!primary.ssn) {
     errors.push("SSN is required.");
+    fieldErrors.push({ id: "pSsn", msg: "Required" });
   } else if (!SSN_PATTERN.test(primary.ssn)) {
     errors.push("SSN must use the format 123-45-6789.");
+    fieldErrors.push({ id: "pSsn", msg: "Format: 123-45-6789" });
   }
   if (!primary.dob) {
     errors.push("Date of birth is required.");
+    fieldErrors.push({ id: "pDob", msg: "Required" });
   } else if (!isPastOrToday(primary.dob)) {
     errors.push("Date of birth must be a real date in the past.");
+    fieldErrors.push({ id: "pDob", msg: "Must be a past date" });
   }
 
   if (state.filingStatus === "married_filing_jointly") {
@@ -1092,19 +1107,25 @@ function validateStep1() {
 
     if (!spouse.firstName) {
       errors.push("Spouse first name is required.");
+      fieldErrors.push({ id: "sFirst", msg: "Required" });
     }
     if (!spouse.lastName) {
       errors.push("Spouse last name is required.");
+      fieldErrors.push({ id: "sLast", msg: "Required" });
     }
     if (!spouse.ssn) {
       errors.push("Spouse SSN is required.");
+      fieldErrors.push({ id: "sSsn", msg: "Required" });
     } else if (!SSN_PATTERN.test(spouse.ssn)) {
       errors.push("Spouse SSN must use the format 123-45-6789.");
+      fieldErrors.push({ id: "sSsn", msg: "Format: 123-45-6789" });
     }
     if (!spouse.dob) {
       errors.push("Spouse date of birth is required.");
+      fieldErrors.push({ id: "sDob", msg: "Required" });
     } else if (!isPastOrToday(spouse.dob)) {
       errors.push("Spouse date of birth must be a real date in the past.");
+      fieldErrors.push({ id: "sDob", msg: "Must be a past date" });
     }
   }
 
@@ -1113,6 +1134,7 @@ function validateStep1() {
   });
   validateUniqueSsnEntries(errors, primary, spouse, dependents);
 
+  errors.fieldErrors = fieldErrors;
   return errors;
 }
 
@@ -1130,12 +1152,55 @@ function showError(messages) {
   const content = Array.isArray(messages) ? messages.join("\n") : String(messages);
   els.error.textContent = content;
   els.error.hidden = false;
-  els.error.scrollIntoView({ behavior: "smooth", block: "center" });
+  const motion = window.matchMedia("(prefers-reduced-motion: reduce)").matches
+    ? "instant"
+    : "smooth";
+
+  clearFieldErrors();
+
+  const fieldErrors = Array.isArray(messages) ? messages.fieldErrors : undefined;
+  let firstInvalid = null;
+
+  if (fieldErrors && fieldErrors.length > 0) {
+    for (const { id, msg } of fieldErrors) {
+      const input = document.getElementById(id);
+      if (!input) {
+        continue;
+      }
+      input.setAttribute("aria-invalid", "true");
+      const hint = document.createElement("span");
+      hint.className = "field-error-inline";
+      hint.textContent = msg;
+      const errorId = `${id}-error`;
+      hint.id = errorId;
+      input.setAttribute("aria-describedby", errorId);
+      input.closest(".field")?.appendChild(hint);
+      if (!firstInvalid) {
+        firstInvalid = input;
+      }
+    }
+  }
+
+  if (firstInvalid) {
+    firstInvalid.focus();
+    firstInvalid.scrollIntoView({ behavior: motion, block: "center" });
+  } else {
+    els.error.scrollIntoView({ behavior: motion, block: "center" });
+  }
 }
 
 function hideError() {
   els.error.hidden = true;
   els.error.textContent = "";
+  clearFieldErrors();
+}
+
+function clearFieldErrors() {
+  document.querySelectorAll(".field-error-inline").forEach((el) => el.remove());
+  document.querySelectorAll('[aria-invalid="true"]').forEach((el) => {
+    el.removeAttribute("aria-invalid");
+    el.removeAttribute("aria-describedby");
+  });
 }
 
 function renderLoadingError(message) {
@@ -1871,9 +1936,11 @@ function scheduleSupportReview() {
   }
 
   window.clearTimeout(supportReviewTimer);
+  els.supportReviewCard.setAttribute("aria-busy", "true");
   supportReviewTimer = window.setTimeout(() => {
     refreshSupportReview();
-  }, 120);
+    els.supportReviewCard.removeAttribute("aria-busy");
+  }, 800);
 }
 
 function refreshSupportReview() {
@@ -3074,6 +3141,10 @@ function clearAllData() {
   els.app.classList.add("hidden");
   removeStoredValue(storageFor("session"), SESSION_DRAFT_STORAGE_KEY);
   removeStoredValue(storageFor("local"), LOCAL_DRAFT_STORAGE_KEY);
+  removeStoredValue(storageFor("local"), LOCAL_DRAFT_PREFERENCE_KEY);
+  if (els.rememberDraftToggle) {
+    els.rememberDraftToggle.checked = false;
+  }
   refreshStorageStatus("Saved draft cleared from this tab and this device.");
   announceUiStatus("All draft data cleared.");
   showDisclaimerGate();

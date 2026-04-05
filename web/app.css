@@ -7,7 +7,7 @@
 
   --text-primary: #e2e8f0;
   --text-secondary: #94a3b8;
-  --text-muted: #64748b;
+  --text-muted: #8b9bb5;
   --text-inverse: #0f172a;
 
   --border-subtle: rgba(148, 163, 184, 0.12);
@@ -778,6 +778,18 @@ body.gate-open {
   color: var(--text-muted);
   font-size: 0.76rem;
   line-height: 1.45;
+}
+
+.field-error-inline {
+  display: block;
+  margin-top: 0.3rem;
+  color: var(--red-400, #f87171);
+  font-size: 0.76rem;
+  font-weight: 600;
+}
+
+.field [aria-invalid="true"] {
+  border-color: var(--red-400, #f87171);
 }
 
 .field input:not([type="checkbox"]),

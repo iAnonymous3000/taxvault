@@ -404,12 +404,12 @@
         <a class="step-jump-link" href="#adjustmentsSection">Adjustments</a>
       </nav>
 
-      <div class="card support-review-card" id="supportReviewCard" aria-live="polite">
+      <div class="card support-review-card" id="supportReviewCard">
         <div class="support-review-header">
           <div>
             <div class="notice-eyebrow">Estimate Readiness</div>
             <h2 class="card-title">Can TaxVault estimate this draft?</h2>
-            <p class="card-subtitle" id="supportReviewSummary">
+            <p class="card-subtitle" id="supportReviewSummary" aria-live="polite" aria-atomic="true">
               Start with the forms you actually have. TaxVault will tell you whether this draft
               fits the supported estimate scope.
             </p>
@@ -679,23 +679,21 @@
     <section class="step-section" id="step3" aria-labelledby="resultTitle">
       <div class="section-intro">
         <div class="section-intro-step">Step 3 of 3</div>
-        <h2 class="section-intro-title">Review the estimate and keep it local if you want</h2>
+        <h2 class="section-intro-title">Your Estimate</h2>
         <p class="section-intro-copy">
-          Use these numbers for planning only. If you want a PDF copy, print from your browser and
-          clear the page when you are done.
-        </p>
-      </div>
-
-      <div class="card result-warning-card">
-        <div class="notice-eyebrow">Do Not File</div>
-        <h2 class="card-title">These numbers are not filing-ready.</h2>
-        <p class="notice-copy">
-          Do not use this estimate to file a tax return, sign a tax document, or decide a payment.
+          Print a PDF copy from your browser, or clear the page when you are done.
         </p>
       </div>
 
       <div class="card">
         <div class="result-hero" id="resultHero" aria-live="polite"></div>
+      </div>
+
+      <div class="card result-warning-card">
+        <div class="notice-eyebrow">Estimate Only</div>
+        <p class="notice-copy">
+          These numbers are for planning only. Do not use them to file a return or decide a payment.
+        </p>
       </div>
 
       <div class="card draft-card" id="draftCard">
