@@ -3117,20 +3117,210 @@ function createSvgElement(tagName, attributes = {}) {
 
 /* ── Local Form Preview ── */
 
-const ACCEPTED_TYPES = ".pdf,.png,.jpg,.jpeg,.heic,.webp";
+const ACCEPTED_TYPES = ".pdf,.png,.jpg,.jpeg,.gif,.heic,.heif,.webp,.avif";
 
-function releasePreviewBlobUrl(previewContainer) {
-  const blobUrl = previewContainer.dataset.blobUrl;
+function releasePreviewBlobUrl(target) {
+  const blobUrl = target?.dataset?.blobUrl;
   if (blobUrl) {
     URL.revokeObjectURL(blobUrl);
-    delete previewContainer.dataset.blobUrl;
+    delete target.dataset.blobUrl;
   }
 }
 
 function cleanupReferencePreviews(root) {
-  root.querySelectorAll(".upload-preview-container").forEach((previewContainer) => {
-    releasePreviewBlobUrl(previewContainer);
+  root.querySelectorAll("[data-blob-url]").forEach((previewItem) => releasePreviewBlobUrl(previewItem));
+}
+
+function getReferencePreviewKind(file) {
+  const lowerName = file.name.toLowerCase();
+
+  if (file.type === "application/pdf" || lowerName.endsWith(".pdf")) {
+    return "pdf";
+  }
+
+  if (
+    (typeof file.type === "string" && file.type.startsWith("image/")) ||
+    /\.(png|jpe?g|gif|heic|heif|webp|avif)$/i.test(lowerName)
+  ) {
+    return "image";
+  }
+
+  return null;
+}
+
+function getReferenceFileKey(file) {
+  return [file.name, file.size, file.lastModified].join(":");
+}
+
+function pluralize(count, singular, plural = `${singular}s`) {
+  return count === 1 ? singular : plural;
+}
+
+function setReferenceFeedback(feedback, message = "", tone = "info") {
+  if (!message) {
+    feedback.textContent = "";
+    feedback.className = "upload-feedback hidden";
+    return;
+  }
+
+  feedback.textContent = message;
+  feedback.className = `upload-feedback ${tone}`;
+}
+
+function syncReferencePreviewState(previewSection, previewList, formLabel) {
+  const count = previewList.childElementCount;
+  const countLabel = previewSection.querySelector(".upload-preview-count");
+  const clearButton = previewSection.querySelector(".upload-preview-clear");
+
+  if (count === 0) {
+    previewSection.classList.add("hidden");
+    countLabel.textContent = "";
+    clearButton.hidden = true;
+    return;
+  }
+
+  countLabel.textContent = `${count} ${formLabel} ${pluralize(count, "reference")} ready on screen.`;
+  clearButton.hidden = false;
+  previewSection.classList.remove("hidden");
+}
+
+function removeReferencePreview(previewItem, previewSection, previewList, formLabel, feedback) {
+  const fileName = previewItem.querySelector(".upload-preview-name")?.textContent || "file";
+  releasePreviewBlobUrl(previewItem);
+  previewItem.remove();
+  syncReferencePreviewState(previewSection, previewList, formLabel);
+  setReferenceFeedback(feedback);
+  announceUiStatus(`Removed ${fileName} from the ${formLabel} reference tray.`);
+}
+
+function clearReferencePreviews(previewSection, previewList, formLabel, feedback) {
+  const previewItems = Array.from(previewList.children);
+  if (!previewItems.length) {
+    return;
+  }
+
+  previewItems.forEach((previewItem) => {
+    releasePreviewBlobUrl(previewItem);
+    previewItem.remove();
   });
+
+  syncReferencePreviewState(previewSection, previewList, formLabel);
+  setReferenceFeedback(feedback);
+  announceUiStatus(`Cleared all local ${formLabel} reference files.`);
+}
+
+function createReferencePreviewCard(file, previewKind, fileKey, previewSection, previewList, formLabel, feedback) {
+  const blobUrl = URL.createObjectURL(file);
+  const previewCard = createElement("div", { className: "upload-preview-card" });
+  previewCard.dataset.blobUrl = blobUrl;
+  previewCard.dataset.fileKey = fileKey;
+
+  const header = createElement("div", { className: "upload-preview-header" });
+  const meta = createElement("div", { className: "upload-preview-meta" });
+  const typeBadge = createElement("span", {
+    className: `upload-preview-type upload-preview-type-${previewKind}`,
+    text: previewKind === "pdf" ? "PDF" : "Image",
+  });
+  const name = createElement("span", {
+    className: "upload-preview-name",
+    text: file.name,
+  });
+
+  const removeBtn = createButtonElement({
+    className: "upload-preview-remove",
+    text: "Remove",
+  });
+  removeBtn.addEventListener("click", () => {
+    removeReferencePreview(previewCard, previewSection, previewList, formLabel, feedback);
+  });
+
+  meta.append(typeBadge, name);
+  header.append(meta, removeBtn);
+
+  const body = createElement("div", { className: "upload-preview-body" });
+
+  if (previewKind === "pdf") {
+    const obj = document.createElement("object");
+    obj.data = blobUrl;
+    obj.type = "application/pdf";
+    obj.textContent = "PDF preview not available in this browser.";
+    body.appendChild(obj);
+  } else {
+    const img = document.createElement("img");
+    img.src = blobUrl;
+    img.alt = `Preview of ${file.name}`;
+    body.appendChild(img);
+  }
+
+  previewCard.append(header, body);
+  return previewCard;
+}
+
+function addReferencePreviews(files, previewSection, previewList, formLabel, feedback) {
+  if (!files.length) {
+    return;
+  }
+
+  const existingKeys = new Set(
+    Array.from(previewList.children).map((previewItem) => previewItem.dataset.fileKey)
+  );
+  const invalidNames = [];
+  let duplicateCount = 0;
+  let addedCount = 0;
+
+  files.forEach((file) => {
+    const previewKind = getReferencePreviewKind(file);
+    if (!previewKind) {
+      invalidNames.push(file.name);
+      return;
+    }
+
+    const fileKey = getReferenceFileKey(file);
+    if (existingKeys.has(fileKey)) {
+      duplicateCount += 1;
+      return;
+    }
+
+    existingKeys.add(fileKey);
+    previewList.appendChild(
+      createReferencePreviewCard(
+        file,
+        previewKind,
+        fileKey,
+        previewSection,
+        previewList,
+        formLabel,
+        feedback
+      )
+    );
+    addedCount += 1;
+  });
+
+  syncReferencePreviewState(previewSection, previewList, formLabel);
+
+  if (addedCount > 0) {
+    announceUiStatus(
+      `Added ${addedCount} ${formLabel} reference ${pluralize(addedCount, "file")} for on-screen review.`
+    );
+  }
+
+  const feedbackMessages = [];
+  let feedbackTone = "info";
+
+  if (invalidNames.length > 0) {
+    feedbackTone = "error";
+    feedbackMessages.push(
+      `Only PDF and image files can be previewed here. Skipped: ${invalidNames.join(", ")}.`
+    );
+  }
+
+  if (duplicateCount > 0) {
+    feedbackMessages.push(
+      `Skipped ${duplicateCount} duplicate ${pluralize(duplicateCount, "file")} already in this tray.`
+    );
+  }
+
+  setReferenceFeedback(feedback, feedbackMessages.join(" "), feedbackTone);
 }
 
 function createReferenceZone(formLabel) {
@@ -3140,7 +3330,10 @@ function createReferenceZone(formLabel) {
   const zone = document.createElement("div");
   zone.className = "upload-zone";
   zone.setAttribute("role", "button");
-  zone.setAttribute("aria-label", `Choose a local ${formLabel} file to preview on screen`);
+  zone.setAttribute(
+    "aria-label",
+    `Choose one or more local ${formLabel} PDFs or images to preview on screen`
+  );
   zone.setAttribute("tabindex", "0");
   const icon = createSvgElement("svg", {
     class: "upload-zone-icon",
@@ -3161,14 +3354,14 @@ function createReferenceZone(formLabel) {
   );
 
   const zoneText = createElement("div", { className: "upload-zone-text" });
-  zoneText.append("Preview a local ");
+  zoneText.append("Add local ");
   const emphasizedLabel = document.createElement("strong");
   emphasizedLabel.textContent = formLabel;
-  zoneText.append(emphasizedLabel, " copy here (optional)");
+  zoneText.append(emphasizedLabel, " PDFs or images (optional)");
 
   const zoneHint = createElement("div", {
     className: "upload-zone-hint",
-    text: "On-screen reference only. TaxVault does not read or import fields from files.",
+    text: "Multiple files supported. On-screen reference only. TaxVault does not read or import fields from files.",
   });
 
   zone.append(icon, zoneText, zoneHint);
@@ -3176,11 +3369,30 @@ function createReferenceZone(formLabel) {
   const fileInput = document.createElement("input");
   fileInput.type = "file";
   fileInput.accept = ACCEPTED_TYPES;
+  fileInput.multiple = true;
   fileInput.setAttribute("aria-hidden", "true");
   zone.appendChild(fileInput);
 
-  const preview = document.createElement("div");
-  preview.className = "upload-preview-container hidden";
+  const feedback = createElement("div", {
+    className: "upload-feedback hidden",
+    attributes: { "aria-live": "polite" },
+  });
+
+  const preview = createElement("div", { className: "upload-preview-container hidden" });
+  const previewToolbar = createElement("div", { className: "upload-preview-toolbar" });
+  const previewCount = createElement("div", { className: "upload-preview-count" });
+  const clearBtn = createButtonElement({
+    className: "upload-preview-clear",
+    text: "Remove all",
+  });
+  clearBtn.hidden = true;
+  clearBtn.addEventListener("click", () => {
+    clearReferencePreviews(preview, previewList, formLabel, feedback);
+  });
+  previewToolbar.append(previewCount, clearBtn);
+
+  const previewList = createElement("div", { className: "upload-preview-list" });
+  preview.append(previewToolbar, previewList);
 
   zone.addEventListener("click", () => fileInput.click());
   zone.addEventListener("keydown", (e) => {
@@ -3199,73 +3411,19 @@ function createReferenceZone(formLabel) {
     e.preventDefault();
     zone.classList.remove("dragover");
     if (e.dataTransfer.files.length > 0) {
-      handleUpload(e.dataTransfer.files[0], zone, preview);
+      addReferencePreviews(Array.from(e.dataTransfer.files), preview, previewList, formLabel, feedback);
     }
   });
 
   fileInput.addEventListener("change", () => {
     if (fileInput.files.length > 0) {
-      handleUpload(fileInput.files[0], zone, preview);
+      addReferencePreviews(Array.from(fileInput.files), preview, previewList, formLabel, feedback);
       fileInput.value = "";
     }
   });
 
-  wrapper.append(zone, preview);
+  wrapper.append(zone, feedback, preview);
   return wrapper;
-}
-
-function handleUpload(file, zone, previewContainer) {
-  const isValid = /\.(pdf|png|jpe?g|heic|webp)$/i.test(file.name);
-  if (!isValid) {
-    return;
-  }
-
-  releasePreviewBlobUrl(previewContainer);
-  const blobUrl = URL.createObjectURL(file);
-  const isPdf = /\.pdf$/i.test(file.name);
-  previewContainer.dataset.blobUrl = blobUrl;
-
-  previewContainer.innerHTML = "";
-
-  const header = document.createElement("div");
-  header.className = "upload-preview-header";
-
-  const name = document.createElement("span");
-  name.className = "upload-preview-name";
-  name.textContent = file.name;
-
-  const removeBtn = document.createElement("button");
-  removeBtn.className = "upload-preview-remove";
-  removeBtn.textContent = "Remove";
-  removeBtn.type = "button";
-  removeBtn.addEventListener("click", () => {
-    releasePreviewBlobUrl(previewContainer);
-    previewContainer.classList.add("hidden");
-    previewContainer.innerHTML = "";
-    zone.classList.remove("hidden");
-  });
-
-  header.append(name, removeBtn);
-
-  const body = document.createElement("div");
-  body.className = "upload-preview-body";
-
-  if (isPdf) {
-    const obj = document.createElement("object");
-    obj.data = blobUrl;
-    obj.type = "application/pdf";
-    obj.textContent = "PDF preview not available in this browser.";
-    body.appendChild(obj);
-  } else {
-    const img = document.createElement("img");
-    img.src = blobUrl;
-    img.alt = `Preview of ${file.name}`;
-    body.appendChild(img);
-  }
-
-  previewContainer.append(header, body);
-  previewContainer.classList.remove("hidden");
-  zone.classList.add("hidden");
 }
 
 if (typeof window !== "undefined") {

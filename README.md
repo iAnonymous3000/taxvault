@@ -17,6 +17,7 @@ Do not use it to file a return, sign a tax document, or decide how much to pay t
 - Standard deduction, including age 65+ and blindness adjustments
 - Child Tax Credit and Credit for Other Dependents for entered dependents
 - Guided manual entry helpers for supported paper forms
+- Multiple local PDF/image reference uploads per supported form card for on-screen review
 - Draft Form 1040 preview with browser print/save-PDF export for local review
 - Browser-only execution for the web app
 
@@ -30,7 +31,7 @@ Do not use it to file a return, sign a tax document, or decide how much to pay t
 - Capital gains schedules
 - ACA credits
 - Most federal forms and schedules outside the supported slice
-- OCR or document image upload
+- OCR or importing fields from uploaded PDFs/images
 - Filing-ready review
 - Official IRS form PDFs ready for filing
 
@@ -38,7 +39,9 @@ Do not use it to file a return, sign a tax document, or decide how much to pay t
 
 The web app is designed to run entirely in the browser. Tax data entered into the UI is processed locally by the compiled WASM engine.
 
-There is currently no OCR upload flow and no cloud document-processing dependency in the repo.
+Local PDF/image references are previewed in-memory inside the current browser session so you can compare several documents on screen without sending them to a server.
+
+There is currently no OCR/import flow for local PDFs or images and no cloud document-processing dependency in the repo.
 
 ## Repository Layout
 
