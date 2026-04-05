@@ -7,14 +7,14 @@ Current recommendation: `NO-GO`
 Reason:
 
 - Tax Vault is intentionally scoped as a narrow 2025 federal estimate tool.
-- The embedded 2025 tax table is currently marked `unverified`.
+- The embedded 2025 tax table is currently marked `machine_checked`, not `human_verified`.
 - Head of Household and some deduction eligibility checks still require manual review.
 
 ## Estimate-Only Release Gate
 
 All items below must be true before a public estimate release:
 
-- `tax-table/federal_2025_table.csv` has `verification.status=verified` plus recorded review metadata.
+- `tax-table/federal_2025_table.csv` has `verification.status=human_verified` plus recorded review metadata.
 - `cargo fmt --all --check` passes.
 - `cargo clippy --workspace --all-targets --all-features -- -D warnings` passes.
 - `cargo test --workspace` passes.

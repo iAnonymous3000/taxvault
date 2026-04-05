@@ -14,13 +14,14 @@ Use this checklist for any public estimate release.
 - Confirm `verification.reviewed_by` names the actual approver.
 - Confirm `verification.reviewed_at` matches the recorded review date.
 - Confirm `verification.method` describes the review that was actually performed.
-- Run `python3 scripts/verify_tax_table.py --check`
+- Run `python3 scripts/verify_tax_table.py --report --check`
 
 ## Verification Commands
 
 - Run `cargo fmt --all --check`
 - Run `cargo clippy --workspace --all-targets --all-features -- -D warnings`
 - Run `cargo test --workspace`
+- Run `python3 -m unittest discover -s tests -p 'test_*.py'`
 - Run browser smoke tests against the release build
 
 ## Release Approval

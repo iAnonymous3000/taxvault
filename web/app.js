@@ -8,8 +8,64 @@ const currencyFormatter = new Intl.NumberFormat("en-US", {
   minimumFractionDigits: 2,
   maximumFractionDigits: 2,
 });
+const draftTimestampFormatter = new Intl.DateTimeFormat("en-US", {
+  dateStyle: "long",
+  timeStyle: "short",
+});
 const SUPPORT_REVIEW_DEFAULT_SUMMARY =
   "Add at least one supported income form to see whether this draft fits TaxVault's current estimate slice.";
+const FILING_STATUS_LABELS = {
+  single: "Single",
+  married_filing_jointly: "Married Filing Jointly",
+  head_of_household: "Head of Household",
+};
+const DRAFT_1040_SECTIONS = [
+  {
+    title: "Income",
+    subtitle: "Core 1040 income lines compiled from the forms TaxVault currently supports.",
+    rows: [
+      { line: "1a", label: "Wages, salaries, tips" },
+      { line: "1z", label: "Total wages" },
+      { line: "2a", label: "Tax-exempt interest" },
+      { line: "2b", label: "Taxable interest" },
+      { line: "3a", label: "Qualified dividends" },
+      { line: "3b", label: "Ordinary dividends" },
+      { line: "6a", label: "Social Security benefits" },
+      { line: "6b", label: "Taxable Social Security benefits" },
+      { line: "9", label: "Total income", emphasis: true },
+      { line: "10", label: "Adjustments to income" },
+      { line: "11b", label: "Adjusted gross income", emphasis: true },
+    ],
+  },
+  {
+    title: "Deductions & Tax",
+    subtitle: "How the supported deductions and credits flow into total tax.",
+    rows: [
+      { line: "12d", label: "Additional age 65+ or blind checkbox" },
+      { line: "12e", label: "Standard deduction" },
+      { line: "14", label: "Total deductions" },
+      { line: "15", label: "Taxable income", emphasis: true },
+      { line: "16", label: "Tax" },
+      { line: "19", label: "Child/dependent credit" },
+      { line: "21", label: "Credits from Schedule 3 equivalent" },
+      { line: "22", label: "Tax after credits" },
+      { line: "24", label: "Total tax", emphasis: true },
+    ],
+  },
+  {
+    title: "Payments & Result",
+    subtitle: "Withholding, refundable credits, and the resulting refund or balance due.",
+    rows: [
+      { line: "25a", label: "W-2 federal income tax withheld" },
+      { line: "25b", label: "SSA-1099 withholding" },
+      { line: "25d", label: "Total federal income tax withheld" },
+      { line: "28", label: "Additional child tax credit" },
+      { line: "33", label: "Total payments", emphasis: true },
+      { line: "34", label: "Estimated refund", emphasis: true },
+      { line: "37", label: "Estimated amount you owe", emphasis: true },
+    ],
+  },
+];
 let supportReviewTimer = 0;
 
 const state = {
@@ -57,6 +113,9 @@ const els = {
   supportReviewIssues: document.getElementById("supportReviewIssues"),
   supportReviewCautionsSection: document.getElementById("supportReviewCautionsSection"),
   supportReviewCautions: document.getElementById("supportReviewCautions"),
+  printDraftBtn: document.getElementById("printDraftBtn"),
+  draftSummaryGrid: document.getElementById("draftSummaryGrid"),
+  draftSections: document.getElementById("draftSections"),
   linesToggle: document.getElementById("linesToggle"),
   linesArrow: document.getElementById("linesArrow"),
   linesContainer: document.getElementById("linesContainer"),
@@ -103,6 +162,7 @@ function bindStaticEvents() {
   els.addDependentBtn.addEventListener("click", addDependent);
   els.clearAllBtn.addEventListener("click", clearAllData);
   els.computeBtn.addEventListener("click", computeReturn);
+  els.printDraftBtn.addEventListener("click", printDraftReturn);
   els.linesToggle.addEventListener("click", toggleLines);
   els.traceToggle.addEventListener("click", toggleTrace);
   els.app.addEventListener("input", handleAppFieldMutation);
@@ -111,6 +171,7 @@ function bindStaticEvents() {
   bindSsnFields(document);
   updateDependentSubtitle(false);
   resetSupportReview();
+  resetDraftPreview();
   syncComputeButtonState();
 }
 
@@ -1383,6 +1444,7 @@ function collectW2Cards(errors) {
 
 function renderResults(data) {
   renderHero(data.summary);
+  renderDraftPreview(data);
   renderMeta(data.meta);
   renderBreakdown(data.summary);
   renderTrace(data.trace);
@@ -1516,9 +1578,7 @@ function renderMeta(meta) {
     { label: "Estimate Scope", value: meta.estimate_scope },
     {
       label: "Tax Table Status",
-      value: meta.tax_table_verified
-        ? "Recorded review present for the embedded 2025 federal tax table"
-        : "Recorded review missing. TaxVault should stay locked for estimate calculations.",
+      value: formatTaxTableStatus(meta),
     },
     { label: "Rule Pack", value: `Federal rules version ${meta.rule_pack_version}` },
     { label: "Privacy", value: meta.privacy },
@@ -1538,6 +1598,170 @@ function renderMeta(meta) {
     li.textContent = item;
     els.scopeList.append(li);
   });
+}
+
+function formatTaxTableStatus(meta) {
+  switch (meta?.tax_table_verification_status) {
+    case "human_verified":
+      return "Human-verified. Eligible for public estimate releases once the other release gates pass.";
+    case "machine_checked":
+      return "Machine-checked. Local/private estimates are enabled, but no human reviewer signoff is recorded for public release.";
+    default:
+      return meta?.tax_table_local_estimate_ready
+        ? "Machine-checked or better. Local estimates are enabled."
+        : "Unverified. Estimate calculations should remain locked.";
+  }
+}
+
+function renderDraftPreview(data) {
+  const form = data?.form || {};
+  const lines = form.lines || {};
+  const summary = data?.summary || {};
+  const meta = data?.meta || {};
+  const primary = readFilerInputs("p");
+  const spouse = state.filingStatus === "married_filing_jointly" ? readFilerInputs("s") : null;
+
+  const summaryItems = [
+    {
+      label: "Tax Year",
+      value: String(form.tax_year || summary.tax_year || "Unavailable"),
+    },
+    {
+      label: "Return Type",
+      value: `${form.form_id || "1040"} local draft`,
+    },
+    {
+      label: "Filing Status",
+      value: formatFilingStatusLabel(summary.filing_status || state.filingStatus),
+    },
+    {
+      label: "Primary Filer",
+      value: formatDraftPerson(primary),
+    },
+  ];
+
+  if (spouse) {
+    summaryItems.push({
+      label: "Spouse",
+      value: formatDraftPerson(spouse),
+    });
+  }
+
+  summaryItems.push(
+    {
+      label: "Generated",
+      value: draftTimestampFormatter.format(new Date()),
+    },
+    {
+      label: "Rule Pack",
+      value: meta.rule_pack_version
+        ? `Federal rules ${meta.rule_pack_version}`
+        : "Unavailable in this preview",
+    },
+    {
+      label: "Privacy",
+      value: "Generated locally in this browser session",
+    }
+  );
+
+  els.draftSummaryGrid.replaceChildren();
+  summaryItems.forEach((item) => {
+    const card = createElement("div", { className: "draft-summary-item" });
+    card.append(
+      createElement("div", { className: "draft-summary-label", text: item.label }),
+      createElement("div", { className: "draft-summary-value", text: item.value })
+    );
+    els.draftSummaryGrid.append(card);
+  });
+
+  els.draftSections.replaceChildren();
+  DRAFT_1040_SECTIONS.forEach((section) => {
+    const sectionEl = createElement("section", { className: "draft-section" });
+    sectionEl.append(
+      createElement("div", { className: "draft-section-title", text: section.title }),
+      createElement("div", { className: "draft-section-subtitle", text: section.subtitle })
+    );
+
+    section.rows.forEach((row) => {
+      sectionEl.append(createDraftLineRow(row, lines));
+    });
+
+    els.draftSections.append(sectionEl);
+  });
+
+  els.printDraftBtn.disabled = Object.keys(lines).length === 0;
+}
+
+function createDraftLineRow(row, lines) {
+  const rowEl = createElement("div", {
+    className: `draft-line-row${row.emphasis ? " emphasis" : ""}`,
+  });
+  const value = Object.prototype.hasOwnProperty.call(lines, row.line) ? lines[row.line] : null;
+  rowEl.append(
+    createElement("span", { className: "draft-line-code", text: `Line ${row.line}` }),
+    createElement("span", { className: "draft-line-label", text: row.label }),
+    createElement("span", {
+      className: "draft-line-value",
+      text: formatDraftLineValue(value),
+    })
+  );
+  return rowEl;
+}
+
+function formatDraftLineValue(value) {
+  if (value == null) {
+    return "Not mapped";
+  }
+
+  if (value && typeof value === "object" && "Checkbox" in value) {
+    return value.Checkbox ? "Checked" : "Blank";
+  }
+
+  return formatLineValue(value);
+}
+
+function formatDraftPerson(filer) {
+  const fullName = [filer?.firstName, filer?.lastName].filter(Boolean).join(" ").trim();
+  const maskedSsn =
+    filer?.ssn && SSN_PATTERN.test(filer.ssn) ? `SSN ending ${filer.ssn.slice(-4)}` : null;
+
+  if (fullName && maskedSsn) {
+    return `${fullName} • ${maskedSsn}`;
+  }
+
+  return fullName || maskedSsn || "Not entered";
+}
+
+function formatFilingStatusLabel(status) {
+  const raw = String(status || "").trim();
+  if (!raw) {
+    return "Unavailable";
+  }
+
+  if (FILING_STATUS_LABELS[raw]) {
+    return FILING_STATUS_LABELS[raw];
+  }
+
+  const normalized = raw
+    .replace(/([a-z])([A-Z])/g, "$1_$2")
+    .replace(/\s+/g, "_")
+    .toLowerCase();
+
+  if (FILING_STATUS_LABELS[normalized]) {
+    return FILING_STATUS_LABELS[normalized];
+  }
+
+  return normalized
+    .split("_")
+    .filter(Boolean)
+    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+    .join(" ");
+}
+
+function resetDraftPreview() {
+  els.draftSummaryGrid.replaceChildren();
+  els.draftSections.replaceChildren();
+  els.printDraftBtn.disabled = true;
 }
 
 function renderTrace(trace) {
@@ -1676,6 +1900,21 @@ function safeMessage(error) {
   return error instanceof Error ? error.message : String(error);
 }
 
+function printDraftReturn() {
+  if (els.printDraftBtn.disabled) {
+    showError("Calculate a supported return before printing a draft preview.");
+    return;
+  }
+
+  if (typeof window.print !== "function") {
+    showError("Printing is not available in this browser.");
+    return;
+  }
+
+  hideError();
+  window.print();
+}
+
 function clearAllData() {
   if (!window.confirm("Clear all entered personal data, tax inputs, and results from this page?")) {
     return;
@@ -1707,6 +1946,7 @@ function clearAllData() {
   els.resultHero.replaceChildren();
   els.resultMeta.replaceChildren();
   els.scopeList.replaceChildren();
+  resetDraftPreview();
   els.breakdownContent.replaceChildren();
   els.traceContainer.textContent = "";
   els.traceContainer.classList.remove("open");
@@ -1890,4 +2130,11 @@ function handleUpload(file, zone, previewContainer) {
   previewContainer.append(header, body);
   previewContainer.classList.remove("hidden");
   zone.classList.add("hidden");
+}
+
+if (typeof window !== "undefined") {
+  window.__taxvaultTesting = Object.freeze({
+    goToStep,
+    renderResults,
+  });
 }

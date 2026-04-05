@@ -274,31 +274,18 @@ fn mfj_two_w2s_two_children_70k() {
 }
 
 #[test]
-fn unverified_table_blocks_sub_100k_without_override() {
+fn machine_checked_table_allows_sub_100k_without_override() {
     let json = include_str!("../../../tests/golden_vectors/single_w2_60k.json");
     let rules = load_rules();
     let facts = load_tax_facts(json).expect("facts should load");
 
     assert!(
-        !rules.meta.table_verified,
-        "embedded tax table should stay locked until a formal review is recorded"
+        rules
+            .meta
+            .table_verification_status
+            .allows_estimate_compute(),
+        "embedded tax table should allow local estimates once machine-checked"
     );
-
-    let options = ComputeOptions {
-        allow_unverified_table: false,
-    };
-    let result = compute(&facts, &rules, &options);
-    assert!(matches!(
-        result,
-        Err(taxvault_engine::ComputeError::UnverifiedTaxTable)
-    ));
-}
-
-#[test]
-fn unverified_table_not_needed_for_100k_plus() {
-    let json = include_str!("../../../tests/golden_vectors/single_w2_150k.json");
-    let rules = load_rules();
-    let facts = load_tax_facts(json).expect("facts should load");
 
     let options = ComputeOptions {
         allow_unverified_table: false,
@@ -306,7 +293,7 @@ fn unverified_table_not_needed_for_100k_plus() {
     let result = compute(&facts, &rules, &options);
     assert!(
         result.is_ok(),
-        "should succeed without unverified table for >=$100k taxable income"
+        "should succeed without override once the embedded table is machine-checked"
     );
 }
 

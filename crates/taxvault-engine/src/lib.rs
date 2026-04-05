@@ -12,7 +12,7 @@ pub use policy::validate_supported_slice;
 pub use rule_pack::{
     ChildTaxCreditRules, MedicareRules, QualifiedDividendRules, RulePack, RulePackMeta,
     SocialSecurityRules, StandardDeductionRules, StudentLoanInterestRules, TaxBracket, TaxBrackets,
-    TestVector,
+    TaxTableVerificationStatus, TestVector,
 };
 pub use tax_table::{TaxTable, TaxTableRow};
 pub use trace::{CalculationTrace, TraceNode, TraceNodeId};

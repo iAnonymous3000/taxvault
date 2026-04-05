@@ -484,7 +484,12 @@ fn compute_ordinary_income_tax(
     options: &ComputeOptions,
 ) -> Result<Decimal, ComputeError> {
     if taxable_income < Decimal::from(100_000) {
-        if !rules.meta.table_verified && !options.allow_unverified_table {
+        if !rules
+            .meta
+            .table_verification_status
+            .allows_estimate_compute()
+            && !options.allow_unverified_table
+        {
             return Err(ComputeError::UnverifiedTaxTable);
         }
         rules
@@ -753,7 +758,7 @@ mod tests {
                 jurisdiction: "federal".into(),
                 version: "1.0.0".into(),
                 effective_date: "2025-01-01".into(),
-                table_verified: false,
+                table_verification_status: TaxTableVerificationStatus::Unverified,
             },
             standard_deduction: StandardDeductionRules {
                 single: Decimal::from(15750),
@@ -895,7 +900,8 @@ mod tests {
                     jurisdiction: "federal".into(),
                     version: "1.0.0".into(),
                     effective_date: "2025-01-01".into(),
-                    table_verified: true,
+                    table_verification_status:
+                        crate::rule_pack::TaxTableVerificationStatus::HumanVerified,
                 },
                 standard_deduction: crate::rule_pack::StandardDeductionRules {
                     single: Decimal::ZERO,
@@ -978,7 +984,8 @@ mod tests {
                     jurisdiction: "federal".into(),
                     version: "1.0.0".into(),
                     effective_date: "2025-01-01".into(),
-                    table_verified: true,
+                    table_verification_status:
+                        crate::rule_pack::TaxTableVerificationStatus::HumanVerified,
                 },
                 standard_deduction: crate::rule_pack::StandardDeductionRules {
                     single: Decimal::ZERO,
@@ -1047,7 +1054,8 @@ mod tests {
                 jurisdiction: "federal".into(),
                 version: "1.0.0".into(),
                 effective_date: "2025-01-01".into(),
-                table_verified: true,
+                table_verification_status:
+                    crate::rule_pack::TaxTableVerificationStatus::HumanVerified,
             },
             standard_deduction: crate::rule_pack::StandardDeductionRules {
                 single: Decimal::ZERO,

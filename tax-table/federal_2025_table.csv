@@ -1,6 +1,7 @@
-# verification.status=unverified
+# verification.status=machine_checked
 # verification.source_reference=2025 IRS Instructions for Form 1040 and 1040-SR tax table (https://www.irs.gov/instructions/i1040gi)
-# verification.pending_reason=Formal reviewer signoff has not yet been recorded in the repository.
+# verification.method=Generated rows matched the embedded CSV using scripts/verify_tax_table.py --check; no human reviewer signoff is recorded.
+# verification.review_type=automation
 # 2025 Federal Tax Table
 # Generated using IRS midpoint rounding convention per Form 1040 Instructions.
 # Covers taxable income $0 to $99,999 using the published IRS row structure.

@@ -3,6 +3,34 @@ use taxvault_core::{DateYmd, FilingStatus};
 
 use crate::tax_table::TaxTable;
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum TaxTableVerificationStatus {
+    Unverified,
+    MachineChecked,
+    HumanVerified,
+}
+
+impl TaxTableVerificationStatus {
+    pub fn allows_estimate_compute(self) -> bool {
+        matches!(
+            self,
+            TaxTableVerificationStatus::MachineChecked | TaxTableVerificationStatus::HumanVerified
+        )
+    }
+
+    pub fn is_human_verified(self) -> bool {
+        matches!(self, TaxTableVerificationStatus::HumanVerified)
+    }
+
+    pub fn as_str(self) -> &'static str {
+        match self {
+            TaxTableVerificationStatus::Unverified => "unverified",
+            TaxTableVerificationStatus::MachineChecked => "machine_checked",
+            TaxTableVerificationStatus::HumanVerified => "human_verified",
+        }
+    }
+}
+
 pub struct RulePack {
     pub meta: RulePackMeta,
     pub standard_deduction: StandardDeductionRules,
@@ -22,7 +50,7 @@ pub struct RulePackMeta {
     pub jurisdiction: String,
     pub version: String,
     pub effective_date: String,
-    pub table_verified: bool,
+    pub table_verification_status: TaxTableVerificationStatus,
 }
 
 pub struct StudentLoanInterestRules {

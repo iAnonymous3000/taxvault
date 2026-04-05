@@ -345,29 +345,126 @@ class WebSmokeTests(unittest.TestCase):
         self.browser.set_value("#w2-1-med-wages", wages)
         self.browser.set_value("#w2-1-med-wh", "870")
 
-    def wait_for_locked_review(self):
+    def wait_for_ready_review(self):
         self.browser.wait_for(
-            lambda: "estimate calculations are locked" in self.browser.text("#supportReviewSummary"),
-            "support review never reached the locked summary",
+            lambda: self.browser.text("#supportReviewBadge") == "Ready",
+            "support review never reached the ready state",
         )
         self.browser.wait_for(
-            lambda: any(
-                "marked unverified" in item for item in self.browser.texts("#supportReviewIssues li")
-            ),
-            "support review never surfaced the unverified tax table issue",
+            lambda: not self.browser.is_disabled("#computeBtn"),
+            "compute button never became enabled for a supported ready review",
         )
 
-    def test_supported_return_stays_locked_until_tax_table_review_is_recorded(self):
+    def render_mock_result(self):
+        mock_result = {
+            "summary": {
+                "tax_year": 2025,
+                "filing_status": "Single",
+                "total_wages": "60000",
+                "total_taxable_interest": "125",
+                "total_tax_exempt_interest": "50",
+                "total_ordinary_dividends": "400",
+                "total_qualified_dividends": "250",
+                "total_social_security_benefits": "0",
+                "taxable_social_security_benefits": "0",
+                "total_income": "60525",
+                "traditional_ira_deduction": "1200",
+                "hsa_deduction": "800",
+                "student_loan_interest_deduction": "250",
+                "total_adjustments": "2250",
+                "adjusted_gross_income": "58275",
+                "standard_deduction": "15750",
+                "total_deductions": "15750",
+                "taxable_income": "42525",
+                "income_tax": "4681",
+                "child_dependent_credit": "0",
+                "additional_child_tax_credit": "0",
+                "total_w2_federal_withholding": "8000",
+                "total_social_security_withholding": "0",
+                "total_tax": "4681",
+                "total_federal_withholding": "8000",
+                "total_payments": "8000",
+                "balance_due": "0",
+                "overpayment": "3319",
+            },
+            "meta": {
+                "rule_pack_version": "1.0.0",
+                "tax_table_verification_status": "machine_checked",
+                "tax_table_local_estimate_ready": True,
+                "tax_table_human_verified": False,
+                "estimate_scope": "Narrow supported-slice estimate",
+                "privacy": "Runs entirely in your browser.",
+                "scope_limits": ["Estimate only."],
+            },
+            "trace": "mock trace",
+            "form": {
+                "form_id": "1040",
+                "tax_year": 2025,
+                "lines": {
+                    "1a": {"Currency": "60000"},
+                    "1z": {"Currency": "60000"},
+                    "2a": {"Currency": "50"},
+                    "2b": {"Currency": "125"},
+                    "3a": {"Currency": "250"},
+                    "3b": {"Currency": "400"},
+                    "6a": {"Currency": "0"},
+                    "6b": {"Currency": "0"},
+                    "9": {"Currency": "60525"},
+                    "10": {"Currency": "2250"},
+                    "11b": {"Currency": "58275"},
+                    "12d": {"Checkbox": False},
+                    "12e": {"Currency": "15750"},
+                    "14": {"Currency": "15750"},
+                    "15": {"Currency": "42525"},
+                    "16": {"Currency": "4681"},
+                    "19": {"Currency": "0"},
+                    "21": {"Currency": "0"},
+                    "22": {"Currency": "4681"},
+                    "24": {"Currency": "4681"},
+                    "25a": {"Currency": "8000"},
+                    "25b": {"Currency": "0"},
+                    "25d": {"Currency": "8000"},
+                    "28": {"Currency": "0"},
+                    "33": {"Currency": "8000"},
+                    "34": {"Currency": "3319"},
+                    "37": {"Currency": "0"},
+                },
+            },
+        }
+
+        rendered = self.browser.execute(
+            """
+            if (!window.__taxvaultTesting) {
+              return false;
+            }
+
+            window.__taxvaultTesting.renderResults(arguments[0]);
+            window.__taxvaultTesting.goToStep(3);
+            return true;
+            """,
+            [mock_result],
+        )
+        if not rendered:
+            raise AssertionError("testing hooks were not available in the browser app")
+
+        self.browser.wait_for(
+            lambda: self.browser.class_list_contains("#step3", "active"),
+            "step 3 never became active for mock result rendering",
+        )
+
+    def test_supported_return_becomes_ready_when_tax_table_allows_local_estimates(self):
         self.open_app()
         self.fill_step1_single()
         self.add_supported_w2()
 
-        self.wait_for_locked_review()
+        self.wait_for_ready_review()
         self.assertIn(
-            "estimate calculations are locked",
+            "machine-checked for local/private estimate use",
             self.browser.text("#supportReviewSummary"),
         )
-        self.assertTrue(self.browser.is_disabled("#computeBtn"))
+        cautions = self.browser.texts("#supportReviewCautions li")
+        self.assertTrue(any("machine-checked" in item for item in cautions))
+        self.assertFalse(self.browser.is_disabled("#computeBtn"))
 
     def test_unsupported_return_shows_blocking_issue_before_compute(self):
         self.open_app()
@@ -412,7 +509,7 @@ class WebSmokeTests(unittest.TestCase):
         )
         self.add_supported_w2()
 
-        self.wait_for_locked_review()
+        self.wait_for_ready_review()
         cautions = self.browser.texts("#supportReviewCautions li")
         self.assertTrue(
             any("Head of Household is still a manual determination" in item for item in cautions)
@@ -420,7 +517,24 @@ class WebSmokeTests(unittest.TestCase):
         self.assertTrue(
             any("does not automatically establish Head of Household" in item for item in cautions)
         )
-        self.assertTrue(self.browser.is_disabled("#computeBtn"))
+        self.assertTrue(any("machine-checked" in item for item in cautions))
+        self.assertFalse(self.browser.is_disabled("#computeBtn"))
+
+    def test_draft_1040_preview_renders_printable_mock_result(self):
+        self.open_app()
+        self.fill_step1_single()
+        self.render_mock_result()
+
+        self.assertFalse(self.browser.is_disabled("#printDraftBtn"))
+        self.assertEqual(self.browser.text(".draft-form-title"), "U.S. Individual Income Tax Return")
+        self.assertTrue(
+            any("Alex Filer" in item for item in self.browser.texts("#draftSummaryGrid .draft-summary-value"))
+        )
+
+        draft_text = self.browser.text("#draftSections")
+        self.assertIn("Line 1a", draft_text)
+        self.assertIn("Wages, salaries, tips", draft_text)
+        self.assertIn("Estimated refund", draft_text)
 
 
 if __name__ == "__main__":

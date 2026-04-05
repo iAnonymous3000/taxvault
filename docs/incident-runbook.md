@@ -23,7 +23,7 @@ Use this runbook if a released build is found to have a tax logic, rule-pack, or
 
 - If the issue affects correctness, keep the app locked until a fixed build is ready.
 - If the issue is limited to one rule pack or one release artifact, replace or roll back that artifact.
-- Do not mark a replacement build `verified` until the review metadata is updated.
+- Do not mark a replacement build `human_verified` until the review metadata is updated.
 
 ## Recovery
 

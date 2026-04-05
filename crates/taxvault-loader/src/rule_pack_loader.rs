@@ -17,7 +17,7 @@ use crate::tax_table_loader::load_tax_table;
 /// Runs self-validation (test vectors through engine) on assembly.
 pub fn load_rule_pack(toml_content: &str, csv_content: &str) -> Result<RulePack, LoaderError> {
     let dto: RulePackDto = toml::from_str(toml_content)?;
-    let (tax_table, table_verified) = load_tax_table(csv_content)?;
+    let (tax_table, table_verification_status) = load_tax_table(csv_content)?;
 
     let age_threshold = parse_date(&dto.age_threshold)?;
 
@@ -70,7 +70,7 @@ pub fn load_rule_pack(toml_content: &str, csv_content: &str) -> Result<RulePack,
             jurisdiction: dto.meta.jurisdiction,
             version: dto.meta.version,
             effective_date: dto.meta.effective_date,
-            table_verified,
+            table_verification_status,
         },
         standard_deduction: StandardDeductionRules {
             single: dto.standard_deduction.single,

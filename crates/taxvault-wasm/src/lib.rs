@@ -5,7 +5,9 @@ use serde::Serialize;
 use taxvault_core::{Dependent, DependentRelationship, FilingStatus, TaxFacts};
 use wasm_bindgen::prelude::*;
 
-use taxvault_engine::{compute, validate_supported_slice, ComputeOptions, RulePack};
+use taxvault_engine::{
+    compute, validate_supported_slice, ComputeOptions, RulePack, TaxTableVerificationStatus,
+};
 use taxvault_forms::{compile_1040, FormLineMap};
 use taxvault_loader::{load_rule_pack, load_tax_facts};
 
@@ -63,7 +65,9 @@ struct TaxSummary {
 #[derive(Serialize)]
 struct EstimateMeta {
     rule_pack_version: String,
-    tax_table_verified: bool,
+    tax_table_verification_status: String,
+    tax_table_local_estimate_ready: bool,
+    tax_table_human_verified: bool,
     estimate_scope: String,
     privacy: String,
     scope_limits: Vec<String>,
@@ -154,11 +158,15 @@ fn compute_tax_inner(json_input: &str) -> WasmResult {
         };
     }
 
-    if !rules.meta.table_verified {
+    if !rules
+        .meta
+        .table_verification_status
+        .allows_estimate_compute()
+    {
         return WasmResult {
             success: false,
             error: Some(
-                "TaxVault is locked because the embedded 2025 federal tax table does not have recorded verification metadata yet."
+                "TaxVault is locked because the embedded 2025 federal tax table is still unverified. Mark it machine_checked for local/private estimates or human_verified for public-release signoff."
                     .into(),
             ),
             summary: None,
@@ -168,7 +176,7 @@ fn compute_tax_inner(json_input: &str) -> WasmResult {
         };
     }
 
-    // Fail closed if a future embedded tax table is not verified.
+    // Fail closed if a future embedded tax table is neither machine-checked nor human-verified.
     let options = ComputeOptions::default();
     let result = match compute(&facts, rules, &options) {
         Ok(r) => r,
@@ -218,21 +226,32 @@ fn compute_tax_inner(json_input: &str) -> WasmResult {
         balance_due: decimal_str(result.balance_due),
         overpayment: decimal_str(result.overpayment),
     };
+    let mut scope_limits = vec![
+        "Not a filing product, signed return, or payment recommendation.".into(),
+        "Does not support EIC, itemized deductions, pensions, IRA distributions, Schedule C, capital gains schedules, ACA credits, or most other federal schedules."
+            .into(),
+        "Traditional IRA and HSA deductions are applied exactly as entered. TaxVault does not verify employer-plan coverage, HDHP eligibility, annual limits, or excess contributions.".into(),
+        "Head of Household and dependency qualification rules are not fully verified by the app.".into(),
+    ];
+
+    if !rules.meta.table_verification_status.is_human_verified() {
+        scope_limits.push(
+            "The embedded 2025 federal tax table is machine-checked, not human-verified. Treat this build as local/private estimate software only."
+                .into(),
+        );
+    }
+
     let meta = EstimateMeta {
         rule_pack_version: result.rule_pack_version.clone(),
-        tax_table_verified: rules.meta.table_verified,
+        tax_table_verification_status: rules.meta.table_verification_status.as_str().into(),
+        tax_table_local_estimate_ready: rules.meta.table_verification_status.allows_estimate_compute(),
+        tax_table_human_verified: rules.meta.table_verification_status.is_human_verified(),
         estimate_scope:
             "Narrow 2025 federal estimate for supported W-2, SSA-1099, 1099-INT, 1099-DIV, and limited above-the-line deduction scenarios only."
                 .into(),
         privacy: "Runs entirely in your browser. Entered tax data stays on this page unless you choose to share it elsewhere."
             .into(),
-        scope_limits: vec![
-            "Not a filing product, signed return, or payment recommendation.".into(),
-            "Does not support EIC, itemized deductions, pensions, IRA distributions, Schedule C, capital gains schedules, ACA credits, or most other federal schedules."
-                .into(),
-            "Traditional IRA and HSA deductions are applied exactly as entered. TaxVault does not verify employer-plan coverage, HDHP eligibility, annual limits, or excess contributions.".into(),
-            "Head of Household and dependency qualification rules are not fully verified by the app.".into(),
-        ],
+        scope_limits,
     };
 
     WasmResult {
@@ -280,7 +299,7 @@ fn review_tax_input_inner(json_input: &str) -> InputReview {
         }
     };
 
-    let cautions = collect_input_cautions(&facts);
+    let mut cautions = collect_input_cautions(&facts);
 
     if let Err(errors) = facts.validate_structure() {
         return InputReview {
@@ -302,22 +321,37 @@ fn review_tax_input_inner(json_input: &str) -> InputReview {
         };
     }
 
-    if !rules.meta.table_verified {
+    if !rules
+        .meta
+        .table_verification_status
+        .allows_estimate_compute()
+    {
         return InputReview {
             ready_for_estimate: false,
             status: "attention".into(),
             summary:
-                "TaxVault reviewed the draft, but estimate calculations are locked until the embedded 2025 tax table has recorded verification."
+                "TaxVault reviewed the draft, but estimate calculations stay locked until the embedded 2025 tax table is at least machine-checked."
                     .into(),
             blocking_issues: vec![
-                "Embedded 2025 federal tax table is marked unverified. Record formal reviewer signoff before using this build for public estimates."
+                "Embedded 2025 federal tax table is still marked unverified. Mark it machine_checked for local/private estimates or human_verified before any public release."
                     .into(),
             ],
             cautions,
         };
     }
 
-    let summary = if cautions.is_empty() {
+    if rules.meta.table_verification_status == TaxTableVerificationStatus::MachineChecked {
+        push_unique(
+            &mut cautions,
+            "The embedded 2025 federal tax table is machine-checked, not human-verified. This build is suitable for local/private estimates, not public-release signoff.",
+        );
+    }
+
+    let summary = if rules.meta.table_verification_status
+        == TaxTableVerificationStatus::MachineChecked
+    {
+        "This draft fits TaxVault's current supported estimate slice. The embedded tax table is machine-checked for local/private estimate use.".into()
+    } else if cautions.is_empty() {
         "This draft fits TaxVault's current supported estimate slice.".into()
     } else {
         "This draft fits the supported slice, but it still needs the manual checks below.".into()
@@ -445,38 +479,35 @@ mod tests {
     use super::*;
 
     #[test]
-    fn compute_tax_blocks_when_embedded_table_is_unverified() {
+    fn compute_tax_succeeds_when_embedded_table_allows_local_estimates() {
         let json = include_str!("../../../tests/golden_vectors/single_w2_60k.json");
         let result = compute_tax_inner(json);
 
-        assert!(!result.success);
-        assert!(result
-            .error
-            .as_deref()
-            .is_some_and(|error| error.contains("does not have recorded verification metadata")));
-        assert!(result.summary.is_none());
-        assert!(result.form.is_none());
-        assert!(result.meta.is_none());
-        assert!(result.trace.is_none());
+        assert!(result.success);
+        assert!(result.error.is_none());
+        assert!(result.summary.is_some());
+        assert!(result.form.is_some());
+        assert!(result.meta.is_some());
+        assert!(result.trace.is_some());
     }
 
     #[test]
-    fn embedded_rule_pack_still_loads_for_review_flows() {
+    fn embedded_rule_pack_allows_local_estimates() {
         let rules = embedded_rule_pack().expect("embedded rule pack should load");
-        assert!(!rules.meta.table_verified);
+        assert!(rules
+            .meta
+            .table_verification_status
+            .allows_estimate_compute());
     }
 
     #[test]
-    fn review_tax_input_reports_attention_for_supported_case_until_table_is_verified() {
+    fn review_tax_input_reports_ready_for_supported_case_when_table_allows_local_use() {
         let json = include_str!("../../../tests/golden_vectors/single_w2_60k.json");
 
         let review = review_tax_input_inner(json);
-        assert!(!review.ready_for_estimate);
-        assert_eq!(review.status, "attention");
-        assert!(review
-            .blocking_issues
-            .iter()
-            .any(|issue| issue.contains("marked unverified")));
+        assert!(review.ready_for_estimate);
+        assert_eq!(review.status, "ready");
+        assert!(review.blocking_issues.is_empty());
     }
 
     #[test]
@@ -574,7 +605,7 @@ mod tests {
     }
 
     #[test]
-    fn review_tax_input_surfaces_hoh_and_dependent_cautions_even_when_estimates_are_locked() {
+    fn review_tax_input_surfaces_hoh_and_dependent_cautions_when_estimates_are_allowed() {
         let json = r#"
         {
           "input": {
@@ -614,12 +645,8 @@ mod tests {
         "#;
 
         let review = review_tax_input_inner(json);
-        assert!(!review.ready_for_estimate);
-        assert_eq!(review.status, "attention");
-        assert!(review
-            .blocking_issues
-            .iter()
-            .any(|issue| issue.contains("marked unverified")));
+        assert!(review.ready_for_estimate);
+        assert_eq!(review.status, "ready");
         assert!(review
             .cautions
             .iter()
@@ -631,7 +658,7 @@ mod tests {
     }
 
     #[test]
-    fn compute_tax_still_accepts_blank_optional_1099_payer_names_before_locking() {
+    fn compute_tax_still_accepts_blank_optional_1099_payer_names_before_compute() {
         let json = r#"
         {
           "input": {
@@ -675,10 +702,8 @@ mod tests {
         "#;
 
         let result = compute_tax_inner(json);
-        assert!(!result.success);
-        assert!(result
-            .error
-            .as_deref()
-            .is_some_and(|error| error.contains("does not have recorded verification metadata")));
+        assert!(result.success);
+        assert!(result.error.is_none());
+        assert!(result.summary.is_some());
     }
 }

@@ -504,6 +504,38 @@
         <div class="result-hero" id="resultHero" aria-live="polite"></div>
       </div>
 
+      <div class="card draft-card" id="draftCard">
+        <div class="card-header draft-card-header">
+          <div>
+            <div class="notice-eyebrow">Local Draft Return</div>
+            <h2 class="card-title">Draft Form 1040 Preview</h2>
+            <p class="card-subtitle">
+              Built from TaxVault's current 1040 line mapping for review only. Print from your
+              browser if you want a local PDF copy.
+            </p>
+          </div>
+          <div class="draft-actions">
+            <button class="btn btn-primary" id="printDraftBtn" type="button" disabled>
+              Print / Save PDF
+            </button>
+          </div>
+        </div>
+        <div class="draft-sheet" id="draftSheet">
+          <div class="draft-watermark" aria-hidden="true">Draft • Do Not File</div>
+          <div class="draft-sheet-header">
+            <div>
+              <div class="draft-form-title">U.S. Individual Income Tax Return</div>
+              <div class="draft-form-subtitle">
+                TaxVault local draft for review only. Not an official IRS filing copy.
+              </div>
+            </div>
+            <div class="draft-form-badge">Form 1040</div>
+          </div>
+          <div class="draft-summary-grid" id="draftSummaryGrid"></div>
+          <div class="draft-sections" id="draftSections"></div>
+        </div>
+      </div>
+
       <div class="card">
         <div class="card-header">
           <h2 class="card-title">Safety &amp; Scope</h2>
@@ -544,7 +576,7 @@
           aria-expanded="false"
         >
           <span class="arrow" id="linesArrow" aria-hidden="true">&#9654;</span>
-          Form 1040 Line-by-Line
+          Raw 1040 Line Data
         </button>
         <div class="lines-container" id="linesContainer"></div>
       </div>

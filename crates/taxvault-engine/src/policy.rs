@@ -97,7 +97,7 @@ mod tests {
                 jurisdiction: "federal".into(),
                 version: "1.0.0".into(),
                 effective_date: "2025-01-01".into(),
-                table_verified: false,
+                table_verification_status: TaxTableVerificationStatus::Unverified,
             },
             standard_deduction: StandardDeductionRules {
                 single: Decimal::from(15750),

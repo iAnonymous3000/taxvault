@@ -25,7 +25,7 @@ pub enum ComputeError {
     #[error("Tax Table lookup failed for taxable income {taxable_income}")]
     TaxTableLookupFailed { taxable_income: Decimal },
 
-    #[error("Tax Table is not verified against official IRS publication; pass allow_unverified_table to override")]
+    #[error("Tax Table is not machine-checked or human-verified; pass allow_unverified_table to override")]
     UnverifiedTaxTable,
 
     #[error("no tax brackets defined for filing status")]

@@ -17,6 +17,7 @@ Do not use it to file a return, sign a tax document, or decide how much to pay t
 - Standard deduction, including age 65+ and blindness adjustments
 - Child Tax Credit and Credit for Other Dependents for entered dependents
 - Guided manual entry helpers for supported paper forms
+- Draft Form 1040 preview with browser print/save-PDF export for local review
 - Browser-only execution for the web app
 
 ## What The App Does Not Support
@@ -31,6 +32,7 @@ Do not use it to file a return, sign a tax document, or decide how much to pay t
 - Most federal forms and schedules outside the supported slice
 - OCR or document image upload
 - Filing-ready review
+- Official IRS form PDFs ready for filing
 
 ## Privacy Model
 
@@ -64,6 +66,8 @@ Run the full verification flow from the workspace root:
 cargo fmt --all --check
 cargo clippy --workspace --all-targets --all-features -- -D warnings
 cargo test --workspace
+python3 -m unittest discover -s tests -p 'test_*.py'
+python3 scripts/verify_tax_table.py --report --check
 ```
 
 ## Rebuild The Web Bundle
@@ -92,9 +96,9 @@ Tax Vault includes Safari-based smoke tests for the browser flow in `tests/web_s
 
 They currently cover:
 
-- the disclaimer gate and supported W-2 draft lock when the tax table is unverified
+- the disclaimer gate and supported W-2 readiness when the tax table is machine-checked
 - pre-compute unsupported-case blocking for Additional Medicare Tax
-- Head of Household manual-review cautions while estimates remain locked
+- Head of Household manual-review cautions alongside machine-check trust warnings
 
 To run them locally on macOS:
 
@@ -112,7 +116,7 @@ Safari's `Allow remote automation` setting must be enabled for WebDriver control
 
 Tax Vault is still an estimate-only product, not filing-grade software.
 
-The checked-in 2025 tax table is intentionally marked `unverified` until a named reviewer records formal signoff in `tax-table/federal_2025_table.csv`. The browser app should remain locked for estimate calculations until that review is complete.
+The checked-in 2025 tax table is currently marked `machine_checked` in `tax-table/federal_2025_table.csv`. That enables local/private estimate calculations, but a named reviewer still needs to record `human_verified` metadata before any public estimate release should be considered.
 
 Use these docs before any public release:
 
