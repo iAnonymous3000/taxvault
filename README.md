@@ -152,7 +152,11 @@ To use it:
 3. Push to `main`
 4. Wait for the `Deploy Pages` workflow to finish
 
-The site will be published at:
+The site will usually be published at:
+
+`https://<owner>.github.io/<repository>/`
+
+For this repository in its current location, that is:
 
 `https://ianonymous3000.github.io/taxvault/`
 

@@ -236,6 +236,18 @@ class BrowserSession:
             raise AssertionError(f"missing element for text lookup: {selector}")
         return text
 
+    def value(self, selector: str) -> str:
+        value = self.execute(
+            """
+            const element = document.querySelector(arguments[0]);
+            return element ? element.value : null;
+            """,
+            [selector],
+        )
+        if value is None:
+            raise AssertionError(f"missing element for value lookup: {selector}")
+        return value
+
     def texts(self, selector: str):
         return self.execute(
             """
@@ -535,6 +547,94 @@ class WebSmokeTests(unittest.TestCase):
         self.assertIn("Line 1a", draft_text)
         self.assertIn("Wages, salaries, tips", draft_text)
         self.assertIn("Estimated refund", draft_text)
+
+    def test_legacy_saved_draft_restores_without_ssns_or_eins(self):
+        legacy_snapshot = {
+            "version": 1,
+            "savedAt": "2026-04-05T12:00:00.000Z",
+            "filingStatus": "single",
+            "currentStep": 2,
+            "hadResults": False,
+            "primaryFiler": {
+                "firstName": "Alex",
+                "lastName": "Filer",
+                "ssn": "400-01-0001",
+                "dob": "1990-06-15",
+                "isBlind": False,
+            },
+            "spouse": {
+                "firstName": "",
+                "lastName": "",
+                "ssn": "",
+                "dob": "",
+                "isBlind": False,
+            },
+            "adjustments": {
+                "traditionalIraDeduction": "",
+                "hsaDeduction": "",
+                "studentLoanInterestPaid": "",
+            },
+            "dependents": [],
+            "w2s": [
+                {
+                    "employerName": "Northwind Co",
+                    "recipient": "primary",
+                    "employerEin": "12-3456789",
+                    "federalTaxWithheld": "8000",
+                    "wages": "60000",
+                    "stateTaxWithheld": "0",
+                    "socialSecurityWages": "60000",
+                    "socialSecurityTaxWithheld": "3720",
+                    "medicareWages": "60000",
+                    "medicareTaxWithheld": "870",
+                    "advancedOpen": False,
+                }
+            ],
+            "socialSecurityIncome": [],
+            "interestIncome": [],
+            "dividendIncome": [],
+        }
+
+        self.browser.navigate(self.server.url)
+        self.browser.wait_for(
+            lambda: self.browser.class_list_contains("#loading", "hidden"),
+            "app never finished loading before seeding draft storage",
+        )
+        self.browser.execute(
+            """
+            window.localStorage.clear();
+            window.sessionStorage.clear();
+            window.localStorage.setItem("taxvault:draft:remember:2025", "true");
+            window.localStorage.setItem(
+              "taxvault:draft:local:2025",
+              JSON.stringify(arguments[0]),
+            );
+            """,
+            [legacy_snapshot],
+        )
+
+        self.browser.navigate(self.server.url)
+        self.browser.wait_for(
+            lambda: self.browser.class_list_contains("#loading", "hidden"),
+            "app never finished loading with seeded legacy draft storage",
+        )
+        self.browser.wait_for(
+            lambda: self.browser.value("#pFirst") == "Alex",
+            "legacy draft never restored the non-sensitive fields",
+        )
+
+        self.assertEqual(self.browser.value("#pSsn"), "")
+        self.assertEqual(self.browser.value("#w2-1-ein"), "")
+        self.assertEqual(self.browser.value("#w2-1-employer"), "Northwind Co")
+        self.assertIn("must be re-entered", self.browser.text("#storageStatus"))
+
+        stored_snapshot = self.browser.execute(
+            'return window.localStorage.getItem("taxvault:draft:local:2025");'
+        )
+        self.assertIsNotNone(stored_snapshot)
+        self.assertNotIn("400-01-0001", stored_snapshot)
+        self.assertNotIn("12-3456789", stored_snapshot)
+        self.assertIn("Northwind Co", stored_snapshot)
 
 
 if __name__ == "__main__":

@@ -29,6 +29,7 @@ const MAX_SOCIAL_SECURITY_FORMS = 10;
 const MAX_DIVIDEND_FORMS = 25;
 const MAX_DEPENDENTS = 15;
 const MAX_TEXT_FIELD_LENGTH = 200;
+const MAX_REFERENCE_FILE_SIZE = 50 * 1024 * 1024; // 50 MB per file
 const DEPENDENT_RELATIONSHIP_OPTIONS = [
   { value: "", label: "Select relationship" },
   { value: "son", label: "Son" },
@@ -595,18 +596,22 @@ function snapshotHasUserData(snapshot) {
   const hasText = (value) => typeof value === "string" && value.trim() !== "";
   const hasTruthyValue = (value) => hasText(value) || value === true;
   const hasObjectValue = (value) =>
-    value && typeof value === "object" && Object.values(value).some(hasTruthyValue);
+    value &&
+    typeof value === "object" &&
+    !Array.isArray(value) &&
+    Object.values(value).some(hasTruthyValue);
+  const hasMeaningfulEntries = (items) => Array.isArray(items) && items.some(hasObjectValue);
 
   return (
-    snapshot.filingStatus !== "single" ||
-    hasObjectValue(snapshot.primaryFiler) ||
-    hasObjectValue(snapshot.spouse) ||
-    hasObjectValue(snapshot.adjustments) ||
-    snapshot.dependents.length > 0 ||
-    snapshot.w2s.length > 0 ||
-    snapshot.interestIncome.length > 0 ||
-    snapshot.socialSecurityIncome.length > 0 ||
-    snapshot.dividendIncome.length > 0
+    snapshot?.filingStatus !== "single" ||
+    hasObjectValue(snapshot?.primaryFiler) ||
+    hasObjectValue(snapshot?.spouse) ||
+    hasObjectValue(snapshot?.adjustments) ||
+    hasMeaningfulEntries(snapshot?.dependents) ||
+    hasMeaningfulEntries(snapshot?.w2s) ||
+    hasMeaningfulEntries(snapshot?.interestIncome) ||
+    hasMeaningfulEntries(snapshot?.socialSecurityIncome) ||
+    hasMeaningfulEntries(snapshot?.dividendIncome)
   );
 }
 
@@ -667,19 +672,48 @@ function captureDraftSnapshot() {
   };
 }
 
-function persistDraftSnapshot() {
+function stripPiiFromSnapshot(snapshot) {
+  const redactFiler = (filer) => {
+    if (!filer) {
+      return filer;
+    }
+    const copy = { ...filer };
+    delete copy.ssn;
+    return copy;
+  };
+
+  return {
+    ...snapshot,
+    primaryFiler: redactFiler(snapshot.primaryFiler),
+    spouse: redactFiler(snapshot.spouse),
+    dependents: (snapshot.dependents || []).map((dep) => {
+      const copy = { ...dep };
+      delete copy.ssn;
+      return copy;
+    }),
+    w2s: (snapshot.w2s || []).map((w2) => {
+      const copy = { ...w2 };
+      delete copy.employerEin;
+      return copy;
+    }),
+  };
+}
+
+function storeDraftSnapshot(snapshot, { refreshStatus = true } = {}) {
   const sessionStorageRef = storageFor("session");
   const localStorageRef = storageFor("local");
-  const snapshot = captureDraftSnapshot();
+  const sanitizedSnapshot = stripPiiFromSnapshot(snapshot);
 
-  if (!snapshotHasUserData(snapshot)) {
+  if (!snapshotHasUserData(sanitizedSnapshot)) {
     removeStoredValue(sessionStorageRef, SESSION_DRAFT_STORAGE_KEY);
     removeStoredValue(localStorageRef, LOCAL_DRAFT_STORAGE_KEY);
-    refreshStorageStatus();
-    return;
+    if (refreshStatus) {
+      refreshStorageStatus();
+    }
+    return null;
   }
 
-  const serialized = JSON.stringify(snapshot);
+  const serialized = JSON.stringify(sanitizedSnapshot);
   writeStoredValue(sessionStorageRef, SESSION_DRAFT_STORAGE_KEY, serialized);
 
   if (rememberDraftEnabled()) {
@@ -689,7 +723,15 @@ function persistDraftSnapshot() {
     removeStoredValue(localStorageRef, LOCAL_DRAFT_STORAGE_KEY);
   }
 
-  refreshStorageStatus();
+  if (refreshStatus) {
+    refreshStorageStatus();
+  }
+
+  return sanitizedSnapshot;
+}
+
+function persistDraftSnapshot() {
+  storeDraftSnapshot(captureDraftSnapshot());
 }
 
 function restoreDraftSnapshot() {
@@ -720,10 +762,16 @@ function restoreDraftSnapshot() {
     return false;
   }
 
-  applyDraftSnapshot(snapshot);
-  const restoredMessage = snapshot.hadResults
-    ? "Draft restored. Recalculate to refresh the estimate results."
-    : "Draft restored. Continue where you left off.";
+  const sanitizedSnapshot = storeDraftSnapshot(snapshot, { refreshStatus: false });
+  if (!sanitizedSnapshot) {
+    refreshStorageStatus();
+    return false;
+  }
+
+  applyDraftSnapshot(sanitizedSnapshot);
+  const restoredMessage = sanitizedSnapshot.hadResults
+    ? "Draft restored. SSNs and EINs must be re-entered (not stored for your protection). Recalculate to refresh the estimate results."
+    : "Draft restored. SSNs and EINs must be re-entered (not stored for your protection).";
   refreshStorageStatus(restoredMessage);
   announceUiStatus("Saved draft restored.");
   return true;
@@ -3336,10 +3384,16 @@ function addReferencePreviews(files, previewSection, previewList, formLabel, fee
     Array.from(previewList.children).map((previewItem) => previewItem.dataset.fileKey)
   );
   const invalidNames = [];
+  const oversizedNames = [];
   let duplicateCount = 0;
   let addedCount = 0;
 
   files.forEach((file) => {
+    if (file.size > MAX_REFERENCE_FILE_SIZE) {
+      oversizedNames.push(file.name);
+      return;
+    }
+
     const previewKind = getReferencePreviewKind(file);
     if (!previewKind) {
       invalidNames.push(file.name);
@@ -3382,6 +3436,13 @@ function addReferencePreviews(files, previewSection, previewList, formLabel, fee
     feedbackTone = "error";
     feedbackMessages.push(
       `Only PDF and image files can be previewed here. Skipped: ${invalidNames.join(", ")}.`
+    );
+  }
+
+  if (oversizedNames.length > 0) {
+    feedbackTone = "error";
+    feedbackMessages.push(
+      `Files over 50 MB cannot be previewed. Skipped: ${oversizedNames.join(", ")}.`
     );
   }
 
