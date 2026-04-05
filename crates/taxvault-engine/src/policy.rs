@@ -43,7 +43,7 @@ pub fn validate_supported_slice(
         }
     }
 
-    // 6. Additional Medicare Tax
+    // 4. Additional Medicare Tax threshold
     let total_medicare_wages: Decimal = facts.w2_income.iter().map(|w| w.medicare_wages).sum();
     let threshold = rules.medicare.threshold_for_status(&facts.filing_status);
 
@@ -62,7 +62,7 @@ pub fn validate_supported_slice(
         });
     }
 
-    // Employer withholding threshold: any single W-2 with medicare_wages > $200k
+    // 5. Employer withholding threshold: any single W-2 with medicare_wages > $200k
     for w2 in &facts.w2_income {
         if w2.medicare_wages > rules.medicare.employer_withholding_threshold {
             errors.push(PolicyError::AdditionalMedicareTaxNotSupported {

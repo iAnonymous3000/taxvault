@@ -130,10 +130,10 @@ pub fn compute(
         vec![],
     );
 
-    let income_before_social_security =
+    let supported_income_before_social_security =
         total_wages + total_taxable_interest + total_ordinary_dividends;
     let social_security_income_base =
-        income_before_social_security - traditional_ira_deduction - hsa_deduction;
+        supported_income_before_social_security - traditional_ira_deduction - hsa_deduction;
     let combined_income = social_security_combined_income(
         social_security_income_base,
         total_tax_exempt_interest,
@@ -142,7 +142,7 @@ pub fn compute(
     let combined_income_id = tb.add(
         "Combined Income for Social Security Worksheet",
         combined_income,
-        "Income before Social Security, minus IRA/HSA deductions, plus tax-exempt interest and half of benefits",
+        "Supported income before Social Security, minus IRA/HSA deductions, plus tax-exempt interest and half of benefits",
         vec![
             wages_id,
             taxable_interest_id,
@@ -173,7 +173,7 @@ pub fn compute(
         vec![combined_income_id, social_security_benefits_id],
     );
 
-    let total_income = income_before_social_security + taxable_social_security_benefits;
+    let total_income = supported_income_before_social_security + taxable_social_security_benefits;
     let total_income_id = tb.add(
         "Total Income",
         total_income,
@@ -584,15 +584,17 @@ fn compute_qualified_dividend_tax(
 }
 
 fn social_security_combined_income(
-    income_before_social_security: Decimal,
+    supported_income_before_social_security: Decimal,
     tax_exempt_interest: Decimal,
     total_benefits: Decimal,
 ) -> Decimal {
-    income_before_social_security + tax_exempt_interest + (total_benefits * Decimal::new(5, 1))
+    supported_income_before_social_security
+        + tax_exempt_interest
+        + (total_benefits * Decimal::new(5, 1))
 }
 
 fn compute_taxable_social_security_benefits(
-    income_before_social_security: Decimal,
+    supported_income_before_social_security: Decimal,
     tax_exempt_interest: Decimal,
     total_benefits: Decimal,
     filing_status: &FilingStatus,
@@ -605,7 +607,7 @@ fn compute_taxable_social_security_benefits(
     let lower_threshold = rules.social_security.benefits_50_threshold(filing_status);
     let upper_threshold = rules.social_security.benefits_85_threshold(filing_status);
     let combined_income = social_security_combined_income(
-        income_before_social_security,
+        supported_income_before_social_security,
         tax_exempt_interest,
         total_benefits,
     );
@@ -625,14 +627,14 @@ fn compute_taxable_social_security_benefits(
 }
 
 fn social_security_taxability_description(
-    income_before_social_security: Decimal,
+    supported_income_before_social_security: Decimal,
     tax_exempt_interest: Decimal,
     total_benefits: Decimal,
     filing_status: &FilingStatus,
     rules: &RulePack,
 ) -> String {
     let combined_income = social_security_combined_income(
-        income_before_social_security,
+        supported_income_before_social_security,
         tax_exempt_interest,
         total_benefits,
     );

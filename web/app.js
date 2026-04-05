@@ -14,6 +14,16 @@ const draftTimestampFormatter = new Intl.DateTimeFormat("en-US", {
 });
 const SUPPORT_REVIEW_DEFAULT_SUMMARY =
   "Add at least one supported income form to see whether this draft fits TaxVault's current estimate slice.";
+const SUPPORTED_TAX_YEAR = 2025;
+const DRAFT_STORAGE_VERSION = 1;
+const SESSION_DRAFT_STORAGE_KEY = `taxvault:draft:session:${SUPPORTED_TAX_YEAR}`;
+const LOCAL_DRAFT_STORAGE_KEY = `taxvault:draft:local:${SUPPORTED_TAX_YEAR}`;
+const LOCAL_DRAFT_PREFERENCE_KEY = `taxvault:draft:remember:${SUPPORTED_TAX_YEAR}`;
+const MAX_W2_FORMS = 25;
+const MAX_INTEREST_FORMS = 25;
+const MAX_SOCIAL_SECURITY_FORMS = 10;
+const MAX_DIVIDEND_FORMS = 25;
+const MAX_DEPENDENTS = 15;
 const FILING_STATUS_LABELS = {
   single: "Single",
   married_filing_jointly: "Married Filing Jointly",
@@ -67,6 +77,8 @@ const DRAFT_1040_SECTIONS = [
   },
 ];
 let supportReviewTimer = 0;
+let draftSaveTimer = 0;
+let draftRestoreInProgress = false;
 
 const state = {
   safetyAcknowledged: false,
@@ -94,6 +106,9 @@ const els = {
   dependentContainer: document.getElementById("dependentContainer"),
   addDependentBtn: document.getElementById("addDependentBtn"),
   clearAllBtn: document.getElementById("clearAllBtn"),
+  rememberDraftToggle: document.getElementById("rememberDraftToggle"),
+  storageStatus: document.getElementById("storageStatus"),
+  uiStatus: document.getElementById("uiStatus"),
   w2Container: document.getElementById("w2Container"),
   addW2Btn: document.getElementById("addW2Btn"),
   socialSecurityContainer: document.getElementById("socialSecurityContainer"),
@@ -135,6 +150,8 @@ async function start() {
   try {
     await init();
     state.wasmReady = true;
+    restoreDraftPreference();
+    restoreDraftSnapshot();
     els.loading.classList.add("hidden");
     syncComputeButtonState();
     showDisclaimerGate();
@@ -161,6 +178,7 @@ function bindStaticEvents() {
   els.addDividendBtn.addEventListener("click", addDividend);
   els.addDependentBtn.addEventListener("click", addDependent);
   els.clearAllBtn.addEventListener("click", clearAllData);
+  els.rememberDraftToggle.addEventListener("change", handleRememberDraftToggle);
   els.computeBtn.addEventListener("click", computeReturn);
   els.printDraftBtn.addEventListener("click", printDraftReturn);
   els.linesToggle.addEventListener("click", toggleLines);
@@ -169,10 +187,458 @@ function bindStaticEvents() {
   els.app.addEventListener("change", handleAppFieldMutation);
 
   bindSsnFields(document);
+  bindMoneyFields(document);
   updateDependentSubtitle(false);
   resetSupportReview();
   resetDraftPreview();
+  refreshStorageStatus();
   syncComputeButtonState();
+}
+
+function announceUiStatus(message) {
+  if (!els.uiStatus || draftRestoreInProgress) {
+    return;
+  }
+
+  els.uiStatus.textContent = "";
+  window.setTimeout(() => {
+    els.uiStatus.textContent = message;
+  }, 0);
+}
+
+function focusElement(target) {
+  if (!(target instanceof HTMLElement) || draftRestoreInProgress) {
+    return;
+  }
+
+  window.requestAnimationFrame(() => {
+    target.focus({ preventScroll: true });
+  });
+}
+
+function focusFirstField(root, selector) {
+  if (!(root instanceof HTMLElement)) {
+    return;
+  }
+
+  const target = root.querySelector(selector);
+  focusElement(target);
+}
+
+function nextFocusTargetAfterRemoval(card, fallback) {
+  return (
+    card.nextElementSibling?.querySelector("input, select, button") ||
+    card.previousElementSibling?.querySelector("input, select, button") ||
+    fallback
+  );
+}
+
+function bindMoneyFields(root) {
+  root.querySelectorAll(".money-input").forEach((input) => {
+    if (input.dataset.moneyBound === "true") {
+      return;
+    }
+
+    input.addEventListener("blur", () => {
+      normalizeMoneyField(input);
+    });
+
+    input.addEventListener("paste", () => {
+      window.setTimeout(() => {
+        normalizeMoneyField(input);
+      }, 0);
+    });
+
+    input.dataset.moneyBound = "true";
+  });
+}
+
+function normalizeMoneyField(input) {
+  const normalized = normalizeMoneyValue(input.value);
+  const isValid = input.value.trim() === "" || normalized !== null;
+
+  input.setAttribute("aria-invalid", String(!isValid));
+
+  if (normalized !== null) {
+    input.value = normalized;
+  }
+}
+
+function storageFor(kind) {
+  if (typeof window === "undefined") {
+    return null;
+  }
+
+  try {
+    const storage = kind === "local" ? window.localStorage : window.sessionStorage;
+    const probeKey = "__taxvault_probe__";
+    storage.setItem(probeKey, "1");
+    storage.removeItem(probeKey);
+    return storage;
+  } catch {
+    return null;
+  }
+}
+
+function readStoredValue(storage, key) {
+  if (!storage) {
+    return null;
+  }
+
+  try {
+    return storage.getItem(key);
+  } catch {
+    return null;
+  }
+}
+
+function writeStoredValue(storage, key, value) {
+  if (!storage) {
+    return false;
+  }
+
+  try {
+    storage.setItem(key, value);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function removeStoredValue(storage, key) {
+  if (!storage) {
+    return;
+  }
+
+  try {
+    storage.removeItem(key);
+  } catch {
+    // Ignore storage cleanup failures in private-browsing or restricted modes.
+  }
+}
+
+function rememberDraftEnabled() {
+  return Boolean(els.rememberDraftToggle?.checked);
+}
+
+function restoreDraftPreference() {
+  if (!els.rememberDraftToggle) {
+    return;
+  }
+
+  const localStorageRef = storageFor("local");
+  if (!localStorageRef) {
+    els.rememberDraftToggle.checked = false;
+    els.rememberDraftToggle.disabled = true;
+    refreshStorageStatus("Draft autosaves only in this tab. Device storage is unavailable in this browser mode.");
+    return;
+  }
+
+  els.rememberDraftToggle.checked =
+    readStoredValue(localStorageRef, LOCAL_DRAFT_PREFERENCE_KEY) === "true";
+}
+
+function handleRememberDraftToggle() {
+  const localStorageRef = storageFor("local");
+
+  if (rememberDraftEnabled()) {
+    writeStoredValue(localStorageRef, LOCAL_DRAFT_PREFERENCE_KEY, "true");
+    persistDraftSnapshot();
+    refreshStorageStatus("Draft will also stay on this device until you clear it.");
+    announceUiStatus("Draft persistence enabled for this device.");
+    return;
+  }
+
+  removeStoredValue(localStorageRef, LOCAL_DRAFT_PREFERENCE_KEY);
+  removeStoredValue(localStorageRef, LOCAL_DRAFT_STORAGE_KEY);
+  persistDraftSnapshot();
+  refreshStorageStatus("Draft will clear when this tab closes unless you enable device storage again.");
+  announceUiStatus("Device draft persistence disabled.");
+}
+
+function refreshStorageStatus(message = "") {
+  if (!els.storageStatus) {
+    return;
+  }
+
+  if (message) {
+    els.storageStatus.textContent = message;
+    return;
+  }
+
+  els.storageStatus.textContent = rememberDraftEnabled()
+    ? "Draft autosaves in this tab and stays on this device until you clear it."
+    : "Draft autosaves in this tab and clears when the tab closes.";
+}
+
+function scheduleDraftSave() {
+  if (draftRestoreInProgress) {
+    return;
+  }
+
+  window.clearTimeout(draftSaveTimer);
+  draftSaveTimer = window.setTimeout(() => {
+    persistDraftSnapshot();
+  }, 120);
+}
+
+function snapshotHasUserData(snapshot) {
+  const hasText = (value) => typeof value === "string" && value.trim() !== "";
+  const hasTruthyValue = (value) => hasText(value) || value === true;
+  const hasObjectValue = (value) =>
+    value && typeof value === "object" && Object.values(value).some(hasTruthyValue);
+
+  return (
+    snapshot.filingStatus !== "single" ||
+    hasObjectValue(snapshot.primaryFiler) ||
+    hasObjectValue(snapshot.spouse) ||
+    hasObjectValue(snapshot.adjustments) ||
+    snapshot.dependents.length > 0 ||
+    snapshot.w2s.length > 0 ||
+    snapshot.interestIncome.length > 0 ||
+    snapshot.socialSecurityIncome.length > 0 ||
+    snapshot.dividendIncome.length > 0
+  );
+}
+
+function captureDraftSnapshot() {
+  return {
+    version: DRAFT_STORAGE_VERSION,
+    savedAt: new Date().toISOString(),
+    filingStatus: state.filingStatus,
+    currentStep: Math.min(state.currentStep, 2),
+    hadResults: state.currentStep === 3,
+    primaryFiler: readFilerInputs("p"),
+    spouse: readFilerInputs("s"),
+    adjustments: {
+      traditionalIraDeduction: els.traditionalIraDeduction.value.trim(),
+      hsaDeduction: els.hsaDeduction.value.trim(),
+      studentLoanInterestPaid: els.studentLoanInterestPaid.value.trim(),
+    },
+    dependents: Array.from(els.dependentContainer.querySelectorAll(".dependent-card")).map((card) => ({
+      firstName: card.querySelector(".dep-first").value.trim(),
+      lastName: card.querySelector(".dep-last").value.trim(),
+      ssn: card.querySelector(".dep-ssn").value.trim(),
+      dob: card.querySelector(".dep-dob").value,
+      relationship: card.querySelector(".dep-relationship").value,
+      monthsLivedInHome: card.querySelector(".dep-months").value.trim(),
+    })),
+    w2s: Array.from(els.w2Container.querySelectorAll(".w2-card")).map((card) => ({
+      employerName: card.querySelector(".w2-employer").value.trim(),
+      recipient: card.querySelector(".w2-recipient").value,
+      employerEin: card.querySelector(".w2-ein").value.trim(),
+      federalTaxWithheld: card.querySelector(".w2-fed-wh").value.trim(),
+      wages: card.querySelector(".w2-wages").value.trim(),
+      stateTaxWithheld: card.querySelector(".w2-state-wh").value.trim(),
+      socialSecurityWages: card.querySelector(".w2-ss-wages").value.trim(),
+      socialSecurityTaxWithheld: card.querySelector(".w2-ss-wh").value.trim(),
+      medicareWages: card.querySelector(".w2-med-wages").value.trim(),
+      medicareTaxWithheld: card.querySelector(".w2-med-wh").value.trim(),
+      advancedOpen: card.querySelector(".w2-advanced-fields").classList.contains("open"),
+    })),
+    socialSecurityIncome: Array.from(els.socialSecurityContainer.querySelectorAll(".ssa-card")).map(
+      (card) => ({
+        recipient: card.querySelector(".ssa-recipient").value,
+        totalBenefits: card.querySelector(".ssa-benefits").value.trim(),
+        voluntaryWithholding: card.querySelector(".ssa-withholding").value.trim(),
+      })
+    ),
+    interestIncome: Array.from(els.interestContainer.querySelectorAll(".w2-card")).map((card) => ({
+      payerName: card.querySelector(".interest-payer").value.trim(),
+      recipient: card.querySelector(".interest-recipient").value,
+      taxableInterest: card.querySelector(".interest-taxable").value.trim(),
+      taxExemptInterest: card.querySelector(".interest-tax-exempt").value.trim(),
+    })),
+    dividendIncome: Array.from(els.dividendContainer.querySelectorAll(".w2-card")).map((card) => ({
+      payerName: card.querySelector(".dividend-payer").value.trim(),
+      recipient: card.querySelector(".dividend-recipient").value,
+      ordinaryDividends: card.querySelector(".dividend-ordinary").value.trim(),
+      qualifiedDividends: card.querySelector(".dividend-qualified").value.trim(),
+    })),
+  };
+}
+
+function persistDraftSnapshot() {
+  const sessionStorageRef = storageFor("session");
+  const localStorageRef = storageFor("local");
+  const snapshot = captureDraftSnapshot();
+
+  if (!snapshotHasUserData(snapshot)) {
+    removeStoredValue(sessionStorageRef, SESSION_DRAFT_STORAGE_KEY);
+    removeStoredValue(localStorageRef, LOCAL_DRAFT_STORAGE_KEY);
+    refreshStorageStatus();
+    return;
+  }
+
+  const serialized = JSON.stringify(snapshot);
+  writeStoredValue(sessionStorageRef, SESSION_DRAFT_STORAGE_KEY, serialized);
+
+  if (rememberDraftEnabled()) {
+    writeStoredValue(localStorageRef, LOCAL_DRAFT_PREFERENCE_KEY, "true");
+    writeStoredValue(localStorageRef, LOCAL_DRAFT_STORAGE_KEY, serialized);
+  } else {
+    removeStoredValue(localStorageRef, LOCAL_DRAFT_STORAGE_KEY);
+  }
+
+  refreshStorageStatus();
+}
+
+function restoreDraftSnapshot() {
+  const localStorageRef = storageFor("local");
+  const sessionStorageRef = storageFor("session");
+  const rawSnapshot =
+    (rememberDraftEnabled() && readStoredValue(localStorageRef, LOCAL_DRAFT_STORAGE_KEY)) ||
+    readStoredValue(sessionStorageRef, SESSION_DRAFT_STORAGE_KEY);
+
+  if (!rawSnapshot) {
+    return false;
+  }
+
+  let snapshot;
+  try {
+    snapshot = JSON.parse(rawSnapshot);
+  } catch {
+    removeStoredValue(sessionStorageRef, SESSION_DRAFT_STORAGE_KEY);
+    removeStoredValue(localStorageRef, LOCAL_DRAFT_STORAGE_KEY);
+    refreshStorageStatus();
+    return false;
+  }
+
+  if (snapshot?.version !== DRAFT_STORAGE_VERSION) {
+    removeStoredValue(sessionStorageRef, SESSION_DRAFT_STORAGE_KEY);
+    removeStoredValue(localStorageRef, LOCAL_DRAFT_STORAGE_KEY);
+    refreshStorageStatus();
+    return false;
+  }
+
+  applyDraftSnapshot(snapshot);
+  const restoredMessage = snapshot.hadResults
+    ? "Draft restored. Recalculate to refresh the estimate results."
+    : "Draft restored. Continue where you left off.";
+  refreshStorageStatus(restoredMessage);
+  announceUiStatus("Saved draft restored.");
+  return true;
+}
+
+function applyDraftSnapshot(snapshot) {
+  draftRestoreInProgress = true;
+
+  try {
+    selectStatus(snapshot.filingStatus || "single", { autoSeedDependent: false });
+    applyFilerInputs("p", snapshot.primaryFiler);
+    applyFilerInputs("s", snapshot.spouse);
+    applyAdjustmentInputs(snapshot.adjustments);
+    restoreDependents(snapshot.dependents || []);
+    restoreW2Cards(snapshot.w2s || []);
+    restoreSocialSecurityCards(snapshot.socialSecurityIncome || []);
+    restoreInterestCards(snapshot.interestIncome || []);
+    restoreDividendCards(snapshot.dividendIncome || []);
+  } finally {
+    draftRestoreInProgress = false;
+  }
+
+  const nextStep = snapshot.currentStep === 2 && validateStep1().length === 0 ? 2 : 1;
+  goToStep(nextStep);
+  hideError();
+}
+
+function applyFilerInputs(prefix, filer = {}) {
+  document.getElementById(`${prefix}First`).value = filer.firstName || "";
+  document.getElementById(`${prefix}Last`).value = filer.lastName || "";
+  document.getElementById(`${prefix}Ssn`).value = filer.ssn || "";
+  document.getElementById(`${prefix}Dob`).value = filer.dob || "";
+  document.getElementById(`${prefix}Blind`).checked = Boolean(filer.isBlind);
+}
+
+function applyAdjustmentInputs(adjustments = {}) {
+  els.traditionalIraDeduction.value = adjustments.traditionalIraDeduction || "";
+  els.hsaDeduction.value = adjustments.hsaDeduction || "";
+  els.studentLoanInterestPaid.value = adjustments.studentLoanInterestPaid || "";
+  bindMoneyFields(document);
+}
+
+function restoreDependents(dependents) {
+  dependents.forEach((dependent) => {
+    const card = addDependent({ focusNewCard: false });
+    if (!card) {
+      return;
+    }
+
+    card.querySelector(".dep-first").value = dependent.firstName || "";
+    card.querySelector(".dep-last").value = dependent.lastName || "";
+    card.querySelector(".dep-ssn").value = dependent.ssn || "";
+    card.querySelector(".dep-dob").value = dependent.dob || "";
+    card.querySelector(".dep-relationship").value = dependent.relationship || "";
+    card.querySelector(".dep-months").value = dependent.monthsLivedInHome || "";
+  });
+}
+
+function restoreW2Cards(w2s) {
+  w2s.forEach((w2) => {
+    const card = addW2({ focusNewCard: false });
+    if (!card) {
+      return;
+    }
+
+    card.querySelector(".w2-employer").value = w2.employerName || "";
+    card.querySelector(".w2-recipient").value = w2.recipient || "primary";
+    card.querySelector(".w2-ein").value = w2.employerEin || "";
+    card.querySelector(".w2-fed-wh").value = w2.federalTaxWithheld || "";
+    card.querySelector(".w2-wages").value = w2.wages || "";
+    card.querySelector(".w2-state-wh").value = w2.stateTaxWithheld || "";
+    card.querySelector(".w2-ss-wages").value = w2.socialSecurityWages || "";
+    card.querySelector(".w2-ss-wh").value = w2.socialSecurityTaxWithheld || "";
+    card.querySelector(".w2-med-wages").value = w2.medicareWages || "";
+    card.querySelector(".w2-med-wh").value = w2.medicareTaxWithheld || "";
+    if (w2.advancedOpen) {
+      toggleAdvanced(card);
+    }
+    bindMoneyFields(card);
+  });
+}
+
+function restoreSocialSecurityCards(items) {
+  items.forEach((item) => {
+    const card = addSocialSecurity({ focusNewCard: false });
+    if (!card) {
+      return;
+    }
+
+    card.querySelector(".ssa-recipient").value = item.recipient || "primary";
+    card.querySelector(".ssa-benefits").value = item.totalBenefits || "";
+    card.querySelector(".ssa-withholding").value = item.voluntaryWithholding || "";
+    bindMoneyFields(card);
+  });
+}
+
+function restoreInterestCards(items) {
+  items.forEach((item) => {
+    const card = addInterest({ focusNewCard: false });
+    if (!card) {
+      return;
+    }
+
+    card.querySelector(".interest-payer").value = item.payerName || "";
+    card.querySelector(".interest-recipient").value = item.recipient || "primary";
+    card.querySelector(".interest-taxable").value = item.taxableInterest || "";
+    card.querySelector(".interest-tax-exempt").value = item.taxExemptInterest || "";
+    bindMoneyFields(card);
+  });
+}
+
+function restoreDividendCards(items) {
+  items.forEach((item) => {
+    const card = addDividend({ focusNewCard: false });
+    if (!card) {
+      return;
+    }
+
+    card.querySelector(".dividend-payer").value = item.payerName || "";
+    card.querySelector(".dividend-recipient").value = item.recipient || "primary";
+    card.querySelector(".dividend-ordinary").value = item.ordinaryDividends || "";
+    card.querySelector(".dividend-qualified").value = item.qualifiedDividends || "";
+    bindMoneyFields(card);
+  });
 }
 
 function bindSsnFields(root) {
@@ -232,7 +698,7 @@ function acknowledgeSafetyGate() {
   els.app.classList.remove("hidden");
 }
 
-function selectStatus(status) {
+function selectStatus(status, { autoSeedDependent = true } = {}) {
   state.filingStatus = status;
 
   document.querySelectorAll(".status-option").forEach((button) => {
@@ -246,7 +712,7 @@ function selectStatus(status) {
   els.spouseCard.classList.toggle("hidden", !isMfj);
   updateDependentSubtitle(isHoh);
 
-  if (isHoh && els.dependentContainer.children.length === 0) {
+  if (autoSeedDependent && isHoh && els.dependentContainer.children.length === 0) {
     addDependent();
   }
 
@@ -266,6 +732,7 @@ function selectStatus(status) {
   });
 
   updateDependentRemoveButtons();
+  scheduleDraftSave();
 }
 
 function updateDependentSubtitle(isHoh) {
@@ -295,6 +762,8 @@ function goToStep(step) {
   if (step === 2) {
     refreshSupportReview();
   }
+
+  scheduleDraftSave();
 
   if (typeof window.scrollTo === "function") {
     window.scrollTo({ top: 0, behavior: "smooth" });
@@ -399,7 +868,21 @@ function renderLoadingError(message) {
   );
 }
 
-function addW2() {
+function canAddCard(container, maxCount, label) {
+  if (container.children.length < maxCount) {
+    return true;
+  }
+
+  showError(`TaxVault currently supports up to ${maxCount} ${label} per draft.`);
+  announceUiStatus(`Maximum reached for ${label}.`);
+  return false;
+}
+
+function addW2({ focusNewCard = true } = {}) {
+  if (!canAddCard(els.w2Container, MAX_W2_FORMS, "W-2 forms")) {
+    return null;
+  }
+
   state.w2Count += 1;
   const idPrefix = `w2-${state.w2Count}`;
   const card = document.createElement("section");
@@ -431,17 +914,17 @@ function addW2() {
         </div>
         <div class="field">
           <label for="${idPrefix}-fed-wh">Federal Tax Withheld (Box 2)</label>
-          <input id="${idPrefix}-fed-wh" type="number" class="w2-fed-wh" min="0" placeholder="0.00" step="0.01">
+          <input id="${idPrefix}-fed-wh" type="text" class="w2-fed-wh money-input" inputmode="decimal" autocomplete="off" placeholder="0.00">
         </div>
       </div>
       <div class="row">
         <div class="field">
           <label for="${idPrefix}-wages">Wages (Box 1)</label>
-          <input id="${idPrefix}-wages" type="number" class="w2-wages" min="0" placeholder="0.00" step="0.01">
+          <input id="${idPrefix}-wages" type="text" class="w2-wages money-input" inputmode="decimal" autocomplete="off" placeholder="0.00">
         </div>
         <div class="field">
           <label for="${idPrefix}-state-wh">State Tax Withheld (Box 17)</label>
-          <input id="${idPrefix}-state-wh" type="number" class="w2-state-wh" min="0" placeholder="0.00" step="0.01">
+          <input id="${idPrefix}-state-wh" type="text" class="w2-state-wh money-input" inputmode="decimal" autocomplete="off" placeholder="0.00">
         </div>
       </div>
     </div>
@@ -454,21 +937,21 @@ function addW2() {
         <div class="row">
           <div class="field">
             <label for="${idPrefix}-ss-wages">SS Wages (Box 3)</label>
-            <input id="${idPrefix}-ss-wages" type="number" class="w2-ss-wages" min="0" placeholder="Same as wages" step="0.01">
+            <input id="${idPrefix}-ss-wages" type="text" class="w2-ss-wages money-input" inputmode="decimal" autocomplete="off" placeholder="Same as wages">
           </div>
           <div class="field">
             <label for="${idPrefix}-ss-wh">SS Tax Withheld (Box 4)</label>
-            <input id="${idPrefix}-ss-wh" type="number" class="w2-ss-wh" min="0" placeholder="0.00" step="0.01">
+            <input id="${idPrefix}-ss-wh" type="text" class="w2-ss-wh money-input" inputmode="decimal" autocomplete="off" placeholder="0.00">
           </div>
         </div>
         <div class="row">
           <div class="field">
             <label for="${idPrefix}-med-wages">Medicare Wages (Box 5)</label>
-            <input id="${idPrefix}-med-wages" type="number" class="w2-med-wages" min="0" placeholder="Same as wages" step="0.01">
+            <input id="${idPrefix}-med-wages" type="text" class="w2-med-wages money-input" inputmode="decimal" autocomplete="off" placeholder="Same as wages">
           </div>
           <div class="field">
             <label for="${idPrefix}-med-wh">Medicare Tax (Box 6)</label>
-            <input id="${idPrefix}-med-wh" type="number" class="w2-med-wh" min="0" placeholder="0.00" step="0.01">
+            <input id="${idPrefix}-med-wh" type="text" class="w2-med-wh money-input" inputmode="decimal" autocomplete="off" placeholder="0.00">
           </div>
         </div>
       </div>
@@ -480,6 +963,7 @@ function addW2() {
   card.querySelector(".w2-ein").addEventListener("input", (event) => {
     event.target.value = formatDigits(event.target.value, [2, 7]);
   });
+  bindMoneyFields(card);
 
   const referenceZone = createReferenceZone("W-2");
   card.insertBefore(referenceZone, card.querySelector(".w2-essential"));
@@ -487,9 +971,20 @@ function addW2() {
   els.w2Container.append(card);
   updateRemoveButtons();
   scheduleSupportReview();
+  scheduleDraftSave();
+  announceUiStatus(`Added W-2 #${els.w2Container.children.length}.`);
+  if (focusNewCard) {
+    focusFirstField(card, ".w2-employer");
+  }
+
+  return card;
 }
 
-function addSocialSecurity() {
+function addSocialSecurity({ focusNewCard = true } = {}) {
+  if (!canAddCard(els.socialSecurityContainer, MAX_SOCIAL_SECURITY_FORMS, "SSA-1099 forms")) {
+    return null;
+  }
+
   state.socialSecurityCount += 1;
   const idPrefix = `ssa-${state.socialSecurityCount}`;
   const card = document.createElement("section");
@@ -510,18 +1005,19 @@ function addSocialSecurity() {
       </div>
       <div class="field">
         <label for="${idPrefix}-benefits">Total Benefits (Box 5)</label>
-        <input id="${idPrefix}-benefits" type="number" class="ssa-benefits" min="0" placeholder="0.00" step="0.01">
+        <input id="${idPrefix}-benefits" type="text" class="ssa-benefits money-input" inputmode="decimal" autocomplete="off" placeholder="0.00">
       </div>
     </div>
     <div class="row">
       <div class="field">
         <label for="${idPrefix}-withholding">Voluntary Federal Tax Withheld (Box 6)</label>
-        <input id="${idPrefix}-withholding" type="number" class="ssa-withholding" min="0" placeholder="0.00" step="0.01">
+        <input id="${idPrefix}-withholding" type="text" class="ssa-withholding money-input" inputmode="decimal" autocomplete="off" placeholder="0.00">
       </div>
     </div>
   `;
 
   card.querySelector(".remove-ssa-btn").addEventListener("click", () => removeSocialSecurity(card));
+  bindMoneyFields(card);
 
   const referenceZone = createReferenceZone("SSA-1099");
   card.insertBefore(referenceZone, card.querySelector(".row"));
@@ -529,9 +1025,20 @@ function addSocialSecurity() {
   els.socialSecurityContainer.append(card);
   updateSocialSecurityRemoveButtons();
   scheduleSupportReview();
+  scheduleDraftSave();
+  announceUiStatus(`Added SSA-1099 #${els.socialSecurityContainer.children.length}.`);
+  if (focusNewCard) {
+    focusFirstField(card, ".ssa-benefits");
+  }
+
+  return card;
 }
 
-function addInterest() {
+function addInterest({ focusNewCard = true } = {}) {
+  if (!canAddCard(els.interestContainer, MAX_INTEREST_FORMS, "1099-INT forms")) {
+    return null;
+  }
+
   state.interestCount += 1;
   const idPrefix = `int-${state.interestCount}`;
   const card = document.createElement("section");
@@ -558,11 +1065,11 @@ function addInterest() {
     <div class="row">
       <div class="field">
         <label for="${idPrefix}-taxable">Taxable Interest (Box 1)</label>
-        <input id="${idPrefix}-taxable" type="number" class="interest-taxable" min="0" placeholder="0.00" step="0.01">
+        <input id="${idPrefix}-taxable" type="text" class="interest-taxable money-input" inputmode="decimal" autocomplete="off" placeholder="0.00">
       </div>
       <div class="field">
         <label for="${idPrefix}-tax-exempt">Tax-Exempt Interest (Box 8)</label>
-        <input id="${idPrefix}-tax-exempt" type="number" class="interest-tax-exempt" min="0" placeholder="0.00" step="0.01">
+        <input id="${idPrefix}-tax-exempt" type="text" class="interest-tax-exempt money-input" inputmode="decimal" autocomplete="off" placeholder="0.00">
       </div>
     </div>
   `;
@@ -570,6 +1077,7 @@ function addInterest() {
   card
     .querySelector(".remove-interest-btn")
     .addEventListener("click", () => removeInterest(card));
+  bindMoneyFields(card);
 
   const referenceZone = createReferenceZone("1099-INT");
   card.insertBefore(referenceZone, card.querySelector(".row"));
@@ -577,9 +1085,20 @@ function addInterest() {
   els.interestContainer.append(card);
   updateInterestRemoveButtons();
   scheduleSupportReview();
+  scheduleDraftSave();
+  announceUiStatus(`Added 1099-INT #${els.interestContainer.children.length}.`);
+  if (focusNewCard) {
+    focusFirstField(card, ".interest-taxable");
+  }
+
+  return card;
 }
 
-function addDividend() {
+function addDividend({ focusNewCard = true } = {}) {
+  if (!canAddCard(els.dividendContainer, MAX_DIVIDEND_FORMS, "1099-DIV forms")) {
+    return null;
+  }
+
   state.dividendCount += 1;
   const idPrefix = `div-${state.dividendCount}`;
   const card = document.createElement("section");
@@ -606,11 +1125,11 @@ function addDividend() {
     <div class="row">
       <div class="field">
         <label for="${idPrefix}-ordinary">Ordinary Dividends (Box 1a)</label>
-        <input id="${idPrefix}-ordinary" type="number" class="dividend-ordinary" min="0" placeholder="0.00" step="0.01">
+        <input id="${idPrefix}-ordinary" type="text" class="dividend-ordinary money-input" inputmode="decimal" autocomplete="off" placeholder="0.00">
       </div>
       <div class="field">
         <label for="${idPrefix}-qualified">Qualified Dividends (Box 1b)</label>
-        <input id="${idPrefix}-qualified" type="number" class="dividend-qualified" min="0" placeholder="0.00" step="0.01">
+        <input id="${idPrefix}-qualified" type="text" class="dividend-qualified money-input" inputmode="decimal" autocomplete="off" placeholder="0.00">
       </div>
     </div>
   `;
@@ -618,6 +1137,7 @@ function addDividend() {
   card
     .querySelector(".remove-dividend-btn")
     .addEventListener("click", () => removeDividend(card));
+  bindMoneyFields(card);
 
   const referenceZone = createReferenceZone("1099-DIV");
   card.insertBefore(referenceZone, card.querySelector(".row"));
@@ -625,9 +1145,20 @@ function addDividend() {
   els.dividendContainer.append(card);
   updateDividendRemoveButtons();
   scheduleSupportReview();
+  scheduleDraftSave();
+  announceUiStatus(`Added 1099-DIV #${els.dividendContainer.children.length}.`);
+  if (focusNewCard) {
+    focusFirstField(card, ".dividend-ordinary");
+  }
+
+  return card;
 }
 
-function addDependent() {
+function addDependent({ focusNewCard = true } = {}) {
+  if (!canAddCard(els.dependentContainer, MAX_DEPENDENTS, "dependents")) {
+    return null;
+  }
+
   state.dependentCount += 1;
   const idPrefix = `dep-${state.dependentCount}`;
   const card = document.createElement("section");
@@ -711,39 +1242,66 @@ function addDependent() {
 
   els.dependentContainer.append(card);
   updateDependentRemoveButtons();
+  scheduleDraftSave();
+  announceUiStatus(`Added dependent #${els.dependentContainer.children.length}.`);
+  if (focusNewCard) {
+    focusFirstField(card, ".dep-first");
+  }
+
+  return card;
 }
 
 function removeW2(card) {
+  const focusTarget = nextFocusTargetAfterRemoval(card, els.addW2Btn);
   cleanupReferencePreviews(card);
   card.remove();
   updateRemoveButtons();
   scheduleSupportReview();
+  scheduleDraftSave();
+  focusElement(focusTarget);
+  announceUiStatus("Removed W-2 form.");
 }
 
 function removeInterest(card) {
+  const focusTarget = nextFocusTargetAfterRemoval(card, els.addInterestBtn);
   cleanupReferencePreviews(card);
   card.remove();
   updateInterestRemoveButtons();
   scheduleSupportReview();
+  scheduleDraftSave();
+  focusElement(focusTarget);
+  announceUiStatus("Removed 1099-INT form.");
 }
 
 function removeSocialSecurity(card) {
+  const focusTarget = nextFocusTargetAfterRemoval(card, els.addSocialSecurityBtn);
   cleanupReferencePreviews(card);
   card.remove();
   updateSocialSecurityRemoveButtons();
   scheduleSupportReview();
+  scheduleDraftSave();
+  focusElement(focusTarget);
+  announceUiStatus("Removed SSA-1099 form.");
 }
 
 function removeDividend(card) {
+  const focusTarget = nextFocusTargetAfterRemoval(card, els.addDividendBtn);
   cleanupReferencePreviews(card);
   card.remove();
   updateDividendRemoveButtons();
   scheduleSupportReview();
+  scheduleDraftSave();
+  focusElement(focusTarget);
+  announceUiStatus("Removed 1099-DIV form.");
 }
 
 function removeDependent(card) {
+  const focusTarget = nextFocusTargetAfterRemoval(card, els.addDependentBtn);
   card.remove();
   updateDependentRemoveButtons();
+  scheduleDraftSave();
+  focusElement(focusTarget);
+  announceUiStatus("Removed dependent.");
 }
 
 function updateRemoveButtons() {
@@ -823,6 +1381,12 @@ function handleAppFieldMutation(event) {
   if (!(event.target instanceof HTMLElement)) {
     return;
   }
+
+  if (event.target.classList.contains("money-input")) {
+    event.target.setAttribute("aria-invalid", "false");
+  }
+
+  scheduleDraftSave();
 
   if (state.currentStep !== 2 || !event.target.closest("#step2")) {
     return;
@@ -1024,6 +1588,17 @@ function buildPayload() {
   const dividendIncome = collectDividendCards(errors);
   const adjustments = collectAdjustments(errors);
 
+  enforceCollectionLimit(errors, "W-2 forms", w2s.length, MAX_W2_FORMS);
+  enforceCollectionLimit(
+    errors,
+    "SSA-1099 forms",
+    socialSecurityIncome.length,
+    MAX_SOCIAL_SECURITY_FORMS
+  );
+  enforceCollectionLimit(errors, "1099-INT forms", interestIncome.length, MAX_INTEREST_FORMS);
+  enforceCollectionLimit(errors, "1099-DIV forms", dividendIncome.length, MAX_DIVIDEND_FORMS);
+  enforceCollectionLimit(errors, "dependents", dependents.length, MAX_DEPENDENTS);
+
   if (
     w2s.length === 0 &&
     socialSecurityIncome.length === 0 &&
@@ -1040,7 +1615,7 @@ function buildPayload() {
   return {
     payload: {
       input: {
-        tax_year: 2025,
+        tax_year: SUPPORTED_TAX_YEAR,
         filing_status: state.filingStatus,
         primary_filer: filerPayload(primary),
         spouse: spouse ? filerPayload(spouse) : null,
@@ -1054,6 +1629,12 @@ function buildPayload() {
     },
     errors,
   };
+}
+
+function enforceCollectionLimit(errors, label, count, maxCount) {
+  if (count > maxCount) {
+    errors.push(`TaxVault supports up to ${maxCount} ${label} per draft.`);
+  }
 }
 
 function collectAdjustments(errors) {
@@ -1855,12 +2436,50 @@ function formatLineValue(value) {
   return String(value);
 }
 
+function normalizeMoneyValue(rawValue) {
+  const trimmed = String(rawValue || "").trim();
+
+  if (trimmed === "") {
+    return "";
+  }
+
+  const hasParens = trimmed.startsWith("(") && trimmed.endsWith(")");
+  let normalized = trimmed.replace(/[$,\s]/g, "");
+
+  if (hasParens) {
+    normalized = `-${normalized.slice(1, -1)}`;
+  }
+
+  if (!/^-?(?:\d+(?:\.\d{0,2})?|\.\d{1,2})$/.test(normalized)) {
+    return null;
+  }
+
+  if (normalized.startsWith(".")) {
+    normalized = `0${normalized}`;
+  } else if (normalized.startsWith("-.")) {
+    normalized = normalized.replace("-.", "-0.");
+  }
+
+  const [wholePart, fractionPart = ""] = normalized.split(".");
+  const compactWholePart = wholePart.replace(/^(-?)0+(?=\d)/, "$1") || "0";
+  const compactFractionPart = fractionPart.replace(/0+$/, "");
+
+  return compactFractionPart ? `${compactWholePart}.${compactFractionPart}` : compactWholePart;
+}
+
 function parseMoney(rawValue, defaultValue = Number.NaN) {
-  if (rawValue === "") {
+  const trimmed = String(rawValue || "").trim();
+
+  if (trimmed === "") {
     return defaultValue;
   }
 
-  const value = Number(rawValue);
+  const normalized = normalizeMoneyValue(trimmed);
+  if (normalized === null || normalized === "") {
+    return Number.NaN;
+  }
+
+  const value = Number(normalized);
   return Number.isFinite(value) ? value : Number.NaN;
 }
 
@@ -1920,6 +2539,7 @@ function clearAllData() {
     return;
   }
 
+  window.clearTimeout(draftSaveTimer);
   hideError();
   resetSupportReview();
   cleanupReferencePreviews(els.app);
@@ -1977,6 +2597,10 @@ function clearAllData() {
   els.gateAcknowledge.checked = false;
   updateGateButtonState();
   els.app.classList.add("hidden");
+  removeStoredValue(storageFor("session"), SESSION_DRAFT_STORAGE_KEY);
+  removeStoredValue(storageFor("local"), LOCAL_DRAFT_STORAGE_KEY);
+  refreshStorageStatus("Saved draft cleared from this tab and this device.");
+  announceUiStatus("All draft data cleared.");
   showDisclaimerGate();
 }
 
@@ -1990,6 +2614,16 @@ function createElement(tagName, { className = "", text = "" } = {}) {
   if (text) {
     element.textContent = text;
   }
+
+  return element;
+}
+
+function createSvgElement(tagName, attributes = {}) {
+  const element = document.createElementNS("http://www.w3.org/2000/svg", tagName);
+
+  Object.entries(attributes).forEach(([name, value]) => {
+    element.setAttribute(name, String(value));
+  });
 
   return element;
 }
@@ -2021,21 +2655,36 @@ function createReferenceZone(formLabel) {
   zone.setAttribute("role", "button");
   zone.setAttribute("aria-label", `Choose a local ${formLabel} file to preview on screen`);
   zone.setAttribute("tabindex", "0");
-  zone.innerHTML = `
-    <svg class="upload-zone-icon" width="28" height="28" viewBox="0 0 24 24" fill="none"
-         stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"
-         aria-hidden="true">
-      <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
-      <polyline points="17 8 12 3 7 8"/>
-      <line x1="12" y1="3" x2="12" y2="15"/>
-    </svg>
-    <div class="upload-zone-text">
-      Preview a local <strong>${formLabel}</strong> copy here (optional)
-    </div>
-    <div class="upload-zone-hint">
-      On-screen reference only. TaxVault does not read or import fields from files.
-    </div>
-  `;
+  const icon = createSvgElement("svg", {
+    class: "upload-zone-icon",
+    width: 28,
+    height: 28,
+    viewBox: "0 0 24 24",
+    fill: "none",
+    stroke: "currentColor",
+    "stroke-width": 2,
+    "stroke-linecap": "round",
+    "stroke-linejoin": "round",
+    "aria-hidden": "true",
+  });
+  icon.append(
+    createSvgElement("path", { d: "M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" }),
+    createSvgElement("polyline", { points: "17 8 12 3 7 8" }),
+    createSvgElement("line", { x1: 12, y1: 3, x2: 12, y2: 15 })
+  );
+
+  const zoneText = createElement("div", { className: "upload-zone-text" });
+  zoneText.append("Preview a local ");
+  const emphasizedLabel = document.createElement("strong");
+  emphasizedLabel.textContent = formLabel;
+  zoneText.append(emphasizedLabel, " copy here (optional)");
+
+  const zoneHint = createElement("div", {
+    className: "upload-zone-hint",
+    text: "On-screen reference only. TaxVault does not read or import fields from files.",
+  });
+
+  zone.append(icon, zoneText, zoneHint);
 
   const fileInput = document.createElement("input");
   fileInput.type = "file";

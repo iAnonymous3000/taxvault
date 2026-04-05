@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-eval' 'wasm-unsafe-eval'; style-src 'self'; img-src 'self' data: blob:; object-src 'self' blob:; base-uri 'none'; form-action 'none'; frame-ancestors 'none'; connect-src 'self'">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; style-src 'self'; img-src 'self' data: blob:; object-src 'self' blob:; base-uri 'none'; form-action 'none'; frame-ancestors 'none'; connect-src 'self'">
 <title>TaxVault Estimate</title>
 <link rel="stylesheet" href="./app.css">
 </head>
@@ -72,11 +72,21 @@
       </p>
     </section>
 
-    <div class="app-toolbar" aria-label="Privacy tools">
-      <button class="btn btn-secondary btn-small" id="clearAllBtn" type="button">
-        Clear All Data
-      </button>
+    <div class="app-toolbar" aria-label="Draft storage and privacy tools">
+      <div class="toolbar-status" id="storageStatus" aria-live="polite">
+        Draft stays only in this tab and clears when the tab closes.
+      </div>
+      <div class="toolbar-actions">
+        <label class="checkbox-field toolbar-toggle" for="rememberDraftToggle">
+          <input id="rememberDraftToggle" type="checkbox">
+          <span>Remember this draft on this device</span>
+        </label>
+        <button class="btn btn-secondary btn-small" id="clearAllBtn" type="button">
+          Clear All Data
+        </button>
+      </div>
     </div>
+    <div id="uiStatus" class="sr-only" aria-live="polite"></div>
 
     <nav class="steps" aria-label="Return steps">
       <div class="step-item">
@@ -456,15 +466,23 @@
             <label for="traditionalIraDeduction">Traditional IRA Deduction</label>
             <input
               id="traditionalIraDeduction"
-              type="number"
-              min="0"
-              step="0.01"
+              type="text"
+              class="money-input"
+              inputmode="decimal"
+              autocomplete="off"
               placeholder="0.00"
             >
           </div>
           <div class="field">
             <label for="hsaDeduction">HSA Deduction</label>
-            <input id="hsaDeduction" type="number" min="0" step="0.01" placeholder="0.00">
+            <input
+              id="hsaDeduction"
+              type="text"
+              class="money-input"
+              inputmode="decimal"
+              autocomplete="off"
+              placeholder="0.00"
+            >
           </div>
         </div>
         <div class="row">
@@ -472,9 +490,10 @@
             <label for="studentLoanInterestPaid">Student Loan Interest Paid</label>
             <input
               id="studentLoanInterestPaid"
-              type="number"
-              min="0"
-              step="0.01"
+              type="text"
+              class="money-input"
+              inputmode="decimal"
+              autocomplete="off"
               placeholder="0.00"
             >
           </div>

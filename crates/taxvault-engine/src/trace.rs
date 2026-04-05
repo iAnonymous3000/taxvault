@@ -1,4 +1,5 @@
 use rust_decimal::Decimal;
+use std::collections::HashMap;
 use std::fmt;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -15,12 +16,28 @@ pub struct TraceNode {
 
 pub struct CalculationTrace {
     nodes: Vec<TraceNode>,
+    node_index_by_id: HashMap<TraceNodeId, usize>,
     root_id: TraceNodeId,
 }
 
 impl CalculationTrace {
     pub fn new(nodes: Vec<TraceNode>, root_id: TraceNodeId) -> Self {
-        Self { nodes, root_id }
+        let node_index_by_id: HashMap<_, _> = nodes
+            .iter()
+            .enumerate()
+            .map(|(index, node)| (node.id, index))
+            .collect();
+        debug_assert_eq!(
+            node_index_by_id.len(),
+            nodes.len(),
+            "trace node ids must be unique"
+        );
+
+        Self {
+            nodes,
+            node_index_by_id,
+            root_id,
+        }
     }
 
     pub fn root_id(&self) -> TraceNodeId {
@@ -28,7 +45,9 @@ impl CalculationTrace {
     }
 
     pub fn get(&self, id: TraceNodeId) -> Option<&TraceNode> {
-        self.nodes.iter().find(|n| n.id == id)
+        self.node_index_by_id
+            .get(&id)
+            .and_then(|index| self.nodes.get(*index))
     }
 
     pub fn inputs_of(&self, id: TraceNodeId) -> Vec<&TraceNode> {
