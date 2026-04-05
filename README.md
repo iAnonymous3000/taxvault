@@ -86,6 +86,28 @@ python3 -m http.server 8000
 
 Then open [http://localhost:8000](http://localhost:8000).
 
+## Run Browser Smoke Tests
+
+Tax Vault includes Safari-based smoke tests for the browser flow in `tests/web_smoke.py`.
+
+They currently cover:
+
+- the disclaimer gate and supported W-2 happy path
+- pre-compute unsupported-case blocking for Additional Medicare Tax
+- Head of Household manual-review cautions
+
+To run them locally on macOS:
+
+```sh
+sudo safaridriver --enable
+cd crates/taxvault-wasm
+wasm-pack build --target web --out-dir ../../web/pkg --release
+cd ../..
+python3 tests/web_smoke.py
+```
+
+Safari's `Allow remote automation` setting must be enabled for WebDriver control.
+
 ## Deploy To GitHub Pages
 
 This repo includes a GitHub Pages workflow at `.github/workflows/pages.yml`.

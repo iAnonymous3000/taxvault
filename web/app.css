@@ -311,6 +311,88 @@ body.gate-open {
   background: linear-gradient(180deg, rgba(245, 158, 11, 0.06), var(--bg-card));
 }
 
+.support-review-card {
+  border-color: rgba(96, 165, 250, 0.18);
+  background: linear-gradient(180deg, rgba(37, 99, 235, 0.08), var(--bg-card));
+}
+
+.support-review-card[data-status="ready"] {
+  border-color: rgba(34, 197, 94, 0.28);
+  background: linear-gradient(180deg, rgba(34, 197, 94, 0.08), var(--bg-card));
+}
+
+.support-review-card[data-status="unsupported"] {
+  border-color: rgba(239, 68, 68, 0.3);
+  background: linear-gradient(180deg, rgba(239, 68, 68, 0.08), var(--bg-card));
+}
+
+.support-review-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 1rem;
+}
+
+.support-review-badge {
+  display: inline-flex;
+  min-width: 7rem;
+  min-height: 2rem;
+  align-items: center;
+  justify-content: center;
+  padding: 0.35rem 0.75rem;
+  border-radius: 999px;
+  font-size: 0.76rem;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.support-review-badge.pending {
+  background: rgba(59, 130, 246, 0.12);
+  color: var(--blue-300);
+}
+
+.support-review-badge.ready {
+  background: rgba(34, 197, 94, 0.12);
+  color: var(--green-700);
+}
+
+.support-review-badge.attention {
+  background: rgba(245, 158, 11, 0.14);
+  color: var(--amber-700);
+}
+
+.support-review-badge.unsupported {
+  background: rgba(239, 68, 68, 0.14);
+  color: var(--red-700);
+}
+
+.support-review-section {
+  margin-top: 1rem;
+  padding-top: 1rem;
+  border-top: 1px solid var(--border-subtle);
+}
+
+.support-review-title {
+  margin: 0 0 0.6rem;
+  color: var(--text-primary);
+  font-size: 0.82rem;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.support-review-list {
+  margin: 0;
+  padding-left: 1.15rem;
+  color: var(--text-secondary);
+  font-size: 0.85rem;
+}
+
+.support-review-list li + li {
+  margin-top: 0.45rem;
+}
+
 .notice-eyebrow {
   margin-bottom: 0.45rem;
   color: var(--amber-500);
@@ -1137,10 +1219,15 @@ body.gate-open {
   }
 
   .w2-card-header,
+  .support-review-header,
   .breakdown-row,
   .line-row {
     align-items: flex-start;
     flex-direction: column;
+  }
+
+  .support-review-badge {
+    min-width: 0;
   }
 
   .line-row .lv {

@@ -1,4 +1,4 @@
-import init, { compute_tax } from "./pkg/taxvault_wasm.js";
+import init, { compute_tax, review_tax_input } from "./pkg/taxvault_wasm.js";
 
 const SSN_PATTERN = /^\d{3}-\d{2}-\d{4}$/;
 const EIN_PATTERN = /^\d{2}-\d{7}$/;
@@ -8,6 +8,9 @@ const currencyFormatter = new Intl.NumberFormat("en-US", {
   minimumFractionDigits: 2,
   maximumFractionDigits: 2,
 });
+const SUPPORT_REVIEW_DEFAULT_SUMMARY =
+  "Add at least one supported income form to see whether this draft fits TaxVault's current estimate slice.";
+let supportReviewTimer = 0;
 
 const state = {
   safetyAcknowledged: false,
@@ -43,6 +46,13 @@ const els = {
   dividendContainer: document.getElementById("dividendContainer"),
   addDividendBtn: document.getElementById("addDividendBtn"),
   computeBtn: document.getElementById("computeBtn"),
+  supportReviewCard: document.getElementById("supportReviewCard"),
+  supportReviewBadge: document.getElementById("supportReviewBadge"),
+  supportReviewSummary: document.getElementById("supportReviewSummary"),
+  supportReviewIssuesSection: document.getElementById("supportReviewIssuesSection"),
+  supportReviewIssues: document.getElementById("supportReviewIssues"),
+  supportReviewCautionsSection: document.getElementById("supportReviewCautionsSection"),
+  supportReviewCautions: document.getElementById("supportReviewCautions"),
   linesToggle: document.getElementById("linesToggle"),
   linesArrow: document.getElementById("linesArrow"),
   linesContainer: document.getElementById("linesContainer"),
@@ -90,9 +100,12 @@ function bindStaticEvents() {
   els.computeBtn.addEventListener("click", computeReturn);
   els.linesToggle.addEventListener("click", toggleLines);
   els.traceToggle.addEventListener("click", toggleTrace);
+  els.app.addEventListener("input", handleAppFieldMutation);
+  els.app.addEventListener("change", handleAppFieldMutation);
 
   bindSsnFields(document);
   updateDependentSubtitle(false);
+  resetSupportReview();
 }
 
 function bindSsnFields(root) {
@@ -212,6 +225,10 @@ function goToStep(step) {
 
   updateStepIndicator();
 
+  if (step === 2) {
+    refreshSupportReview();
+  }
+
   if (typeof window.scrollTo === "function") {
     window.scrollTo({ top: 0, behavior: "smooth" });
   }
@@ -239,6 +256,7 @@ function updateStepIndicator() {
 function validateStep1() {
   const errors = [];
   const primary = readFilerInputs("p");
+  let spouse = null;
 
   if (!primary.firstName) {
     errors.push("First name is required.");
@@ -258,7 +276,7 @@ function validateStep1() {
   }
 
   if (state.filingStatus === "married_filing_jointly") {
-    const spouse = readFilerInputs("s");
+    spouse = readFilerInputs("s");
 
     if (!spouse.firstName) {
       errors.push("Spouse first name is required.");
@@ -276,17 +294,12 @@ function validateStep1() {
     } else if (!isPastOrToday(spouse.dob)) {
       errors.push("Spouse date of birth must be a real date in the past.");
     }
-
-    if (
-      SSN_PATTERN.test(primary.ssn) &&
-      SSN_PATTERN.test(spouse.ssn) &&
-      primary.ssn === spouse.ssn
-    ) {
-      errors.push("Primary filer and spouse must have different SSNs.");
-    }
   }
 
-  collectDependents(errors, { requireAtLeastOne: state.filingStatus === "head_of_household" });
+  const dependents = collectDependents(errors, {
+    requireAtLeastOne: state.filingStatus === "head_of_household",
+  });
+  validateUniqueSsnEntries(errors, primary, spouse, dependents);
 
   return errors;
 }
@@ -406,6 +419,7 @@ function addW2() {
 
   els.w2Container.append(card);
   updateRemoveButtons();
+  scheduleSupportReview();
 }
 
 function addSocialSecurity() {
@@ -447,6 +461,7 @@ function addSocialSecurity() {
 
   els.socialSecurityContainer.append(card);
   updateSocialSecurityRemoveButtons();
+  scheduleSupportReview();
 }
 
 function addInterest() {
@@ -494,6 +509,7 @@ function addInterest() {
 
   els.interestContainer.append(card);
   updateInterestRemoveButtons();
+  scheduleSupportReview();
 }
 
 function addDividend() {
@@ -541,6 +557,7 @@ function addDividend() {
 
   els.dividendContainer.append(card);
   updateDividendRemoveButtons();
+  scheduleSupportReview();
 }
 
 function addDependent() {
@@ -630,23 +647,31 @@ function addDependent() {
 }
 
 function removeW2(card) {
+  cleanupReferencePreviews(card);
   card.remove();
   updateRemoveButtons();
+  scheduleSupportReview();
 }
 
 function removeInterest(card) {
+  cleanupReferencePreviews(card);
   card.remove();
   updateInterestRemoveButtons();
+  scheduleSupportReview();
 }
 
 function removeSocialSecurity(card) {
+  cleanupReferencePreviews(card);
   card.remove();
   updateSocialSecurityRemoveButtons();
+  scheduleSupportReview();
 }
 
 function removeDividend(card) {
+  cleanupReferencePreviews(card);
   card.remove();
   updateDividendRemoveButtons();
+  scheduleSupportReview();
 }
 
 function removeDependent(card) {
@@ -727,6 +752,136 @@ function toggleTrace() {
   els.traceToggle.setAttribute("aria-expanded", String(open));
 }
 
+function handleAppFieldMutation(event) {
+  if (!(event.target instanceof HTMLElement)) {
+    return;
+  }
+
+  if (state.currentStep !== 2 || !event.target.closest("#step2")) {
+    return;
+  }
+
+  scheduleSupportReview();
+}
+
+function scheduleSupportReview() {
+  if (state.currentStep !== 2) {
+    return;
+  }
+
+  window.clearTimeout(supportReviewTimer);
+  supportReviewTimer = window.setTimeout(() => {
+    refreshSupportReview();
+  }, 120);
+}
+
+function refreshSupportReview() {
+  if (state.currentStep !== 2) {
+    return;
+  }
+
+  if (!state.wasmReady) {
+    renderSupportReviewPending("Loading the tax engine so TaxVault can review this draft.");
+    return;
+  }
+
+  const { payload, errors } = buildPayload();
+  const blockingIssues = dedupeMessages(errors);
+
+  if (blockingIssues.length > 0) {
+    if (
+      blockingIssues.length === 1 &&
+      blockingIssues[0] === "Add at least one W-2, SSA-1099, 1099-INT, or 1099-DIV before calculating."
+    ) {
+      renderSupportReviewPending(SUPPORT_REVIEW_DEFAULT_SUMMARY);
+      return;
+    }
+
+    renderSupportReview({
+      status: "attention",
+      summary: "Finish the items below before calculating.",
+      blocking_issues: blockingIssues,
+      cautions: [],
+    });
+    return;
+  }
+
+  try {
+    const review = JSON.parse(review_tax_input(JSON.stringify(payload)));
+    renderSupportReview(review);
+  } catch (error) {
+    renderSupportReview({
+      status: "attention",
+      summary: "TaxVault could not review this draft right now.",
+      blocking_issues: [`Support review error: ${safeMessage(error)}`],
+      cautions: [],
+    });
+  }
+}
+
+function resetSupportReview() {
+  window.clearTimeout(supportReviewTimer);
+  renderSupportReviewPending(SUPPORT_REVIEW_DEFAULT_SUMMARY);
+}
+
+function renderSupportReviewPending(summary) {
+  els.supportReviewCard.dataset.status = "pending";
+  els.supportReviewSummary.textContent = summary;
+  els.supportReviewBadge.className = "support-review-badge pending";
+  els.supportReviewBadge.textContent = "In Progress";
+  setSupportReviewItems(els.supportReviewIssuesSection, els.supportReviewIssues, []);
+  setSupportReviewItems(els.supportReviewCautionsSection, els.supportReviewCautions, []);
+}
+
+function renderSupportReview(review) {
+  const status = ["ready", "attention", "unsupported"].includes(review?.status)
+    ? review.status
+    : "attention";
+
+  els.supportReviewCard.dataset.status = status;
+  els.supportReviewSummary.textContent =
+    review?.summary || "TaxVault reviewed this draft, but the status message was unavailable.";
+  els.supportReviewBadge.className = `support-review-badge ${status}`;
+  els.supportReviewBadge.textContent = supportReviewBadgeLabel(status);
+  setSupportReviewItems(
+    els.supportReviewIssuesSection,
+    els.supportReviewIssues,
+    dedupeMessages(review?.blocking_issues || [])
+  );
+  setSupportReviewItems(
+    els.supportReviewCautionsSection,
+    els.supportReviewCautions,
+    dedupeMessages(review?.cautions || [])
+  );
+}
+
+function supportReviewBadgeLabel(status) {
+  switch (status) {
+    case "ready":
+      return "Ready";
+    case "unsupported":
+      return "Unsupported";
+    default:
+      return "Needs Attention";
+  }
+}
+
+function setSupportReviewItems(section, list, items) {
+  list.replaceChildren();
+
+  items.forEach((item) => {
+    const li = document.createElement("li");
+    li.textContent = item;
+    list.append(li);
+  });
+
+  section.classList.toggle("hidden", items.length === 0);
+}
+
+function dedupeMessages(messages) {
+  return Array.from(new Set(messages.map((message) => String(message))));
+}
+
 function computeReturn() {
   if (!state.safetyAcknowledged) {
     showDisclaimerGate();
@@ -782,6 +937,7 @@ function buildPayload() {
   const dependents = collectDependents(errors, {
     requireAtLeastOne: state.filingStatus === "head_of_household",
   });
+  validateUniqueSsnEntries(errors, primary, spouse, dependents);
   const w2s = collectW2Cards(errors);
   const socialSecurityIncome = collectSocialSecurityCards(errors);
   const interestIncome = collectInterestCards(errors);
@@ -1319,6 +1475,47 @@ function renderTrace(trace) {
   els.traceContainer.scrollTop = 0;
 }
 
+function validateUniqueSsnEntries(errors, primary, spouse, dependents) {
+  const seen = new Map();
+  const entries = [
+    {
+      label: "Primary filer",
+      ssn: primary?.ssn?.trim() || "",
+      valid: SSN_PATTERN.test(primary?.ssn?.trim() || ""),
+    },
+  ];
+
+  if (state.filingStatus === "married_filing_jointly") {
+    entries.push({
+      label: "Spouse",
+      ssn: spouse?.ssn?.trim() || "",
+      valid: SSN_PATTERN.test(spouse?.ssn?.trim() || ""),
+    });
+  }
+
+  dependents.forEach((dependent, index) => {
+    entries.push({
+      label: `Dependent #${index + 1}`,
+      ssn: dependent.ssn,
+      valid: SSN_PATTERN.test(dependent.ssn),
+    });
+  });
+
+  entries.forEach((entry) => {
+    if (!entry.valid) {
+      return;
+    }
+
+    const existingLabel = seen.get(entry.ssn);
+    if (existingLabel) {
+      errors.push(`${existingLabel} and ${entry.label} must have different SSNs.`);
+      return;
+    }
+
+    seen.set(entry.ssn, entry.label);
+  });
+}
+
 function renderLines(lines) {
   els.linesContainer.replaceChildren();
 
@@ -1415,6 +1612,8 @@ function clearAllData() {
   }
 
   hideError();
+  resetSupportReview();
+  cleanupReferencePreviews(els.app);
   document.getElementById("pFirst").value = "";
   document.getElementById("pLast").value = "";
   document.getElementById("pSsn").value = "";
@@ -1485,6 +1684,20 @@ function createElement(tagName, { className = "", text = "" } = {}) {
 /* ── Local Form Preview ── */
 
 const ACCEPTED_TYPES = ".pdf,.png,.jpg,.jpeg,.heic,.webp";
+
+function releasePreviewBlobUrl(previewContainer) {
+  const blobUrl = previewContainer.dataset.blobUrl;
+  if (blobUrl) {
+    URL.revokeObjectURL(blobUrl);
+    delete previewContainer.dataset.blobUrl;
+  }
+}
+
+function cleanupReferencePreviews(root) {
+  root.querySelectorAll(".upload-preview-container").forEach((previewContainer) => {
+    releasePreviewBlobUrl(previewContainer);
+  });
+}
 
 function createReferenceZone(formLabel) {
   const wrapper = document.createElement("div");
@@ -1558,8 +1771,10 @@ function handleUpload(file, zone, previewContainer) {
     return;
   }
 
+  releasePreviewBlobUrl(previewContainer);
   const blobUrl = URL.createObjectURL(file);
   const isPdf = /\.pdf$/i.test(file.name);
+  previewContainer.dataset.blobUrl = blobUrl;
 
   previewContainer.innerHTML = "";
 
@@ -1575,7 +1790,7 @@ function handleUpload(file, zone, previewContainer) {
   removeBtn.textContent = "Remove";
   removeBtn.type = "button";
   removeBtn.addEventListener("click", () => {
-    URL.revokeObjectURL(blobUrl);
+    releasePreviewBlobUrl(previewContainer);
     previewContainer.classList.add("hidden");
     previewContainer.innerHTML = "";
     zone.classList.remove("hidden");

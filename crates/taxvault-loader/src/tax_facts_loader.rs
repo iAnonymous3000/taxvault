@@ -234,4 +234,64 @@ mod tests {
         assert!(facts.w2_income.is_empty());
         assert_eq!(facts.interest_income.len(), 1);
     }
+
+    #[test]
+    fn accepts_omitted_interest_payer_name() {
+        let json = r#"
+        {
+          "input": {
+            "tax_year": 2025,
+            "filing_status": "single",
+            "primary_filer": {
+              "first_name": "Test",
+              "last_name": "Filer",
+              "ssn": "400-01-0001",
+              "date_of_birth": "1990-06-15",
+              "is_blind": false,
+              "is_dependent": false
+            },
+            "spouse": null,
+            "interest_income": [{
+              "recipient": "primary",
+              "taxable_interest": 100,
+              "tax_exempt_interest": 0
+            }]
+          }
+        }
+        "#;
+
+        let facts = load_tax_facts(json).expect("should accept interest input without payer_name");
+        assert_eq!(facts.interest_income.len(), 1);
+        assert!(facts.interest_income[0].payer_name.is_empty());
+    }
+
+    #[test]
+    fn accepts_omitted_dividend_payer_name() {
+        let json = r#"
+        {
+          "input": {
+            "tax_year": 2025,
+            "filing_status": "single",
+            "primary_filer": {
+              "first_name": "Test",
+              "last_name": "Filer",
+              "ssn": "400-01-0001",
+              "date_of_birth": "1990-06-15",
+              "is_blind": false,
+              "is_dependent": false
+            },
+            "spouse": null,
+            "dividend_income": [{
+              "recipient": "primary",
+              "ordinary_dividends": 100,
+              "qualified_dividends": 50
+            }]
+          }
+        }
+        "#;
+
+        let facts = load_tax_facts(json).expect("should accept dividend input without payer_name");
+        assert_eq!(facts.dividend_income.len(), 1);
+        assert!(facts.dividend_income[0].payer_name.is_empty());
+    }
 }

@@ -109,7 +109,6 @@ impl TaxFacts {
                 FilingStatus::MarriedFilingJointly => {}
             }
 
-            validate_required_text("1099-INT payer name", &interest.payer_name, &mut errors);
             validate_interest_amounts(interest, &mut errors);
         }
 
@@ -125,7 +124,6 @@ impl TaxFacts {
                 FilingStatus::MarriedFilingJointly => {}
             }
 
-            validate_required_text("1099-DIV payer name", &dividend.payer_name, &mut errors);
             validate_dividend_amounts(dividend, &mut errors);
         }
 
@@ -154,23 +152,23 @@ impl TaxFacts {
 
 fn validate_ssn_uniqueness(facts: &TaxFacts, errors: &mut Vec<ValidationError>) {
     let mut seen: HashSet<_> = HashSet::new();
-    let mut has_dup = false;
+    let mut has_dependent_dup = false;
 
     seen.insert(&facts.primary_filer.ssn);
 
     if let Some(spouse) = &facts.spouse {
         if !seen.insert(&spouse.ssn) {
-            has_dup = true;
+            errors.push(ValidationError::DuplicateFilerSsn);
         }
     }
 
     for dep in &facts.dependents {
         if !seen.insert(&dep.ssn) {
-            has_dup = true;
+            has_dependent_dup = true;
         }
     }
 
-    if has_dup {
+    if has_dependent_dup {
         errors.push(ValidationError::DuplicateSsn);
     }
 }
@@ -233,6 +231,7 @@ fn validate_w2_amounts(w2: &W2Income, errors: &mut Vec<ValidationError>) {
 }
 
 fn validate_interest_amounts(interest: &InterestIncome, errors: &mut Vec<ValidationError>) {
+    let payer_label = display_payer_name(&interest.payer_name, "unnamed 1099-INT payer");
     let fields: &[(&str, &Decimal)] = &[
         ("taxable_interest", &interest.taxable_interest),
         ("tax_exempt_interest", &interest.tax_exempt_interest),
@@ -241,7 +240,7 @@ fn validate_interest_amounts(interest: &InterestIncome, errors: &mut Vec<Validat
     for (name, value) in fields {
         if *value < &Decimal::ZERO {
             errors.push(ValidationError::NegativeAmount {
-                field: format!("1099-INT({}).{}", interest.payer_name, name),
+                field: format!("1099-INT({payer_label}).{name}"),
                 value: value.to_string(),
             });
         }
@@ -249,6 +248,7 @@ fn validate_interest_amounts(interest: &InterestIncome, errors: &mut Vec<Validat
 }
 
 fn validate_dividend_amounts(dividend: &DividendIncome, errors: &mut Vec<ValidationError>) {
+    let payer_label = display_payer_name(&dividend.payer_name, "unnamed 1099-DIV payer");
     let fields: &[(&str, &Decimal)] = &[
         ("ordinary_dividends", &dividend.ordinary_dividends),
         ("qualified_dividends", &dividend.qualified_dividends),
@@ -257,7 +257,7 @@ fn validate_dividend_amounts(dividend: &DividendIncome, errors: &mut Vec<Validat
     for (name, value) in fields {
         if *value < &Decimal::ZERO {
             errors.push(ValidationError::NegativeAmount {
-                field: format!("1099-DIV({}).{}", dividend.payer_name, name),
+                field: format!("1099-DIV({payer_label}).{name}"),
                 value: value.to_string(),
             });
         }
@@ -265,7 +265,7 @@ fn validate_dividend_amounts(dividend: &DividendIncome, errors: &mut Vec<Validat
 
     if dividend.qualified_dividends > dividend.ordinary_dividends {
         errors.push(ValidationError::QualifiedDividendsExceedOrdinaryDividends {
-            payer: dividend.payer_name.clone(),
+            payer: payer_label.to_string(),
             ordinary: dividend.ordinary_dividends.to_string(),
             qualified: dividend.qualified_dividends.to_string(),
         });
@@ -316,6 +316,15 @@ fn validate_ein(ein: &str, errors: &mut Vec<ValidationError>) {
         errors.push(ValidationError::InvalidEin {
             ein: ein.to_string(),
         });
+    }
+}
+
+fn display_payer_name<'a>(payer_name: &'a str, fallback: &'a str) -> &'a str {
+    let trimmed = payer_name.trim();
+    if trimmed.is_empty() {
+        fallback
+    } else {
+        trimmed
     }
 }
 
@@ -580,6 +589,32 @@ mod tests {
         let errs = facts.validate_structure().unwrap_err();
         assert!(errs
             .iter()
+            .any(|e| matches!(e, ValidationError::DuplicateFilerSsn)));
+    }
+
+    #[test]
+    fn duplicate_dependent_ssn_rejected() {
+        let facts = TaxFacts {
+            tax_year: 2025,
+            filing_status: FilingStatus::HeadOfHousehold,
+            primary_filer: test_filer(),
+            spouse: None,
+            dependents: vec![crate::Dependent {
+                first_name: "Jamie".into(),
+                last_name: "Filer".into(),
+                ssn: Ssn::parse("400-01-0001").unwrap(),
+                date_of_birth: DateYmd::new(2016, 6, 15).unwrap(),
+                relationship: crate::DependentRelationship::Daughter,
+                months_lived_in_home: 12,
+            }],
+            w2_income: vec![test_w2(FilerRole::Primary)],
+            interest_income: vec![],
+            dividend_income: vec![],
+            social_security_income: vec![],
+        };
+        let errs = facts.validate_structure().unwrap_err();
+        assert!(errs
+            .iter()
             .any(|e| matches!(e, ValidationError::DuplicateSsn)));
     }
 
@@ -714,7 +749,7 @@ mod tests {
     }
 
     #[test]
-    fn blank_interest_payer_rejected() {
+    fn blank_interest_payer_allowed() {
         let mut interest = test_interest(FilerRole::Primary);
         interest.payer_name = "   ".into();
         let facts = TaxFacts {
@@ -728,14 +763,11 @@ mod tests {
             dividend_income: vec![],
             social_security_income: vec![],
         };
-        let errs = facts.validate_structure().unwrap_err();
-        assert!(errs
-            .iter()
-            .any(|e| matches!(e, ValidationError::EmptyRequiredField { field } if field == "1099-INT payer name")));
+        assert!(facts.validate_structure().is_ok());
     }
 
     #[test]
-    fn blank_dividend_payer_rejected() {
+    fn blank_dividend_payer_allowed() {
         let mut dividend = test_dividend(FilerRole::Primary);
         dividend.payer_name = "   ".into();
         let facts = TaxFacts {
@@ -749,10 +781,31 @@ mod tests {
             dividend_income: vec![dividend],
             social_security_income: vec![],
         };
+        assert!(facts.validate_structure().is_ok());
+    }
+
+    #[test]
+    fn blank_dividend_payer_uses_fallback_label_in_errors() {
+        let mut dividend = test_dividend(FilerRole::Primary);
+        dividend.payer_name = "   ".into();
+        dividend.qualified_dividends = Decimal::from(350);
+        let facts = TaxFacts {
+            tax_year: 2025,
+            filing_status: FilingStatus::Single,
+            primary_filer: test_filer(),
+            spouse: None,
+            dependents: vec![],
+            w2_income: vec![],
+            interest_income: vec![],
+            dividend_income: vec![dividend],
+            social_security_income: vec![],
+        };
         let errs = facts.validate_structure().unwrap_err();
-        assert!(errs
-            .iter()
-            .any(|e| matches!(e, ValidationError::EmptyRequiredField { field } if field == "1099-DIV payer name")));
+        assert!(errs.iter().any(|e| matches!(
+            e,
+            ValidationError::QualifiedDividendsExceedOrdinaryDividends { payer, .. }
+            if payer == "unnamed 1099-DIV payer"
+        )));
     }
 
     #[test]

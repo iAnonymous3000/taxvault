@@ -2,6 +2,7 @@ use std::sync::OnceLock;
 
 use rust_decimal::Decimal;
 use serde::Serialize;
+use taxvault_core::{Dependent, DependentRelationship, FilingStatus, TaxFacts};
 use wasm_bindgen::prelude::*;
 
 use taxvault_engine::{compute, validate_supported_slice, ComputeOptions, RulePack};
@@ -64,6 +65,15 @@ struct EstimateMeta {
     scope_limits: Vec<String>,
 }
 
+#[derive(Debug, Serialize)]
+struct InputReview {
+    ready_for_estimate: bool,
+    status: String,
+    summary: String,
+    blocking_issues: Vec<String>,
+    cautions: Vec<String>,
+}
+
 fn decimal_str(d: Decimal) -> String {
     d.round_dp(2).to_string()
 }
@@ -71,12 +81,13 @@ fn decimal_str(d: Decimal) -> String {
 #[wasm_bindgen]
 pub fn compute_tax(json_input: &str) -> String {
     let result = compute_tax_inner(json_input);
-    serde_json::to_string(&result).unwrap_or_else(|e| {
-        format!(
-            r#"{{"success":false,"error":"serialization error: {}"}}"#,
-            e
-        )
-    })
+    serialize_response(&result)
+}
+
+#[wasm_bindgen]
+pub fn review_tax_input(json_input: &str) -> String {
+    let review = review_tax_input_inner(json_input);
+    serialize_response(&review)
 }
 
 fn compute_tax_inner(json_input: &str) -> WasmResult {
@@ -219,6 +230,160 @@ fn format_error_list(prefix: &str, messages: &[String]) -> String {
     }
 }
 
+fn review_tax_input_inner(json_input: &str) -> InputReview {
+    let rules = match embedded_rule_pack() {
+        Ok(rules) => rules,
+        Err(error) => {
+            return InputReview {
+                ready_for_estimate: false,
+                status: "attention".into(),
+                summary: "TaxVault could not load its embedded 2025 rules.".into(),
+                blocking_issues: vec![format!("Rule pack error: {error}")],
+                cautions: vec![],
+            };
+        }
+    };
+
+    let facts = match load_tax_facts(json_input) {
+        Ok(facts) => facts,
+        Err(error) => {
+            return InputReview {
+                ready_for_estimate: false,
+                status: "attention".into(),
+                summary: "Finish the required fields so TaxVault can review this draft.".into(),
+                blocking_issues: vec![format!("Input error: {error}")],
+                cautions: vec![],
+            };
+        }
+    };
+
+    let cautions = collect_input_cautions(&facts);
+
+    if let Err(errors) = facts.validate_structure() {
+        return InputReview {
+            ready_for_estimate: false,
+            status: "attention".into(),
+            summary: "Finish the items below before calculating.".into(),
+            blocking_issues: errors.iter().map(ToString::to_string).collect(),
+            cautions,
+        };
+    }
+
+    if let Err(errors) = validate_supported_slice(&facts, rules) {
+        return InputReview {
+            ready_for_estimate: false,
+            status: "unsupported".into(),
+            summary: "This draft is outside TaxVault's current supported estimate slice.".into(),
+            blocking_issues: errors.iter().map(ToString::to_string).collect(),
+            cautions,
+        };
+    }
+
+    let summary = if cautions.is_empty() {
+        "This draft fits TaxVault's current supported estimate slice.".into()
+    } else {
+        "This draft fits the supported slice, but it still needs the manual checks below.".into()
+    };
+
+    InputReview {
+        ready_for_estimate: true,
+        status: "ready".into(),
+        summary,
+        blocking_issues: vec![],
+        cautions,
+    }
+}
+
+fn collect_input_cautions(facts: &TaxFacts) -> Vec<String> {
+    let mut cautions = Vec::new();
+
+    if facts.filing_status == FilingStatus::HeadOfHousehold {
+        push_unique(
+            &mut cautions,
+            "Head of Household is still a manual determination. TaxVault does not verify keeping-up-a-home, residency, or qualifying person rules.",
+        );
+    }
+
+    if facts
+        .dependents
+        .iter()
+        .any(|dependent| dependent.months_lived_in_home <= 6)
+    {
+        push_unique(
+            &mut cautions,
+            "A dependent who lived in the home 6 months or less will not be treated as a qualifying child for the Child Tax Credit in this estimate.",
+        );
+    }
+
+    if facts
+        .dependents
+        .iter()
+        .any(|dependent| !is_potential_child_tax_credit_child(dependent, facts.tax_year))
+    {
+        push_unique(
+            &mut cautions,
+            "One or more dependents may only qualify for the $500 Credit for Other Dependents, or may require manual eligibility review before relying on this estimate.",
+        );
+    }
+
+    if facts.filing_status == FilingStatus::HeadOfHousehold
+        && facts.dependents.iter().any(|dependent| {
+            matches!(
+                dependent.relationship,
+                DependentRelationship::Parent
+                    | DependentRelationship::Grandparent
+                    | DependentRelationship::Other
+            )
+        })
+    {
+        push_unique(
+            &mut cautions,
+            "A parent, grandparent, or 'other' dependent does not automatically establish Head of Household. Support and household rules still need manual review.",
+        );
+    }
+
+    cautions
+}
+
+fn is_potential_child_tax_credit_child(dependent: &Dependent, tax_year: u16) -> bool {
+    matches!(
+        dependent.relationship,
+        DependentRelationship::Son
+            | DependentRelationship::Daughter
+            | DependentRelationship::Stepchild
+            | DependentRelationship::FosterChild
+            | DependentRelationship::Sibling
+            | DependentRelationship::StepSibling
+            | DependentRelationship::HalfSibling
+            | DependentRelationship::Grandchild
+            | DependentRelationship::Niece
+            | DependentRelationship::Nephew
+    ) && dependent.months_lived_in_home > 6
+        && (
+            dependent.date_of_birth.year(),
+            dependent.date_of_birth.month(),
+            dependent.date_of_birth.day(),
+        ) > (tax_year.saturating_sub(17), 12, 31)
+}
+
+fn push_unique(items: &mut Vec<String>, message: &str) {
+    if !items.iter().any(|item| item == message) {
+        items.push(message.to_string());
+    }
+}
+
+fn serialize_response<T: Serialize>(value: &T) -> String {
+    serde_json::to_string(value).unwrap_or_else(|error| serialize_fallback_error(&error))
+}
+
+fn serialize_fallback_error(error: &serde_json::Error) -> String {
+    serde_json::json!({
+        "success": false,
+        "error": format!("serialization error: {error}"),
+    })
+    .to_string()
+}
+
 fn embedded_rule_pack() -> Result<&'static RulePack, String> {
     match EMBEDDED_RULE_PACK
         .get_or_init(|| load_rule_pack(RULES_TOML, TAX_TABLE_CSV).map_err(|e| e.to_string()))
@@ -289,5 +454,159 @@ mod tests {
             .error
             .as_deref()
             .is_some_and(|error| error.contains("primary filer first name is required")));
+    }
+
+    #[test]
+    fn review_tax_input_reports_ready_for_supported_case() {
+        let json = include_str!("../../../tests/golden_vectors/single_w2_60k.json");
+
+        let review = review_tax_input_inner(json);
+        assert!(review.ready_for_estimate);
+        assert_eq!(review.status, "ready");
+        assert!(review.blocking_issues.is_empty());
+    }
+
+    #[test]
+    fn fallback_serialization_error_is_valid_json() {
+        let error = serde_json::from_str::<serde_json::Value>("not json").unwrap_err();
+        let payload = serialize_fallback_error(&error);
+        let parsed: serde_json::Value =
+            serde_json::from_str(&payload).expect("fallback should stay valid JSON");
+
+        assert_eq!(parsed["success"], serde_json::Value::Bool(false));
+        assert!(parsed["error"]
+            .as_str()
+            .is_some_and(|message| message.contains("serialization error")));
+    }
+
+    #[test]
+    fn review_tax_input_reports_unsupported_case() {
+        let json = r#"
+        {
+          "input": {
+            "tax_year": 2025,
+            "filing_status": "single",
+            "primary_filer": {
+              "first_name": "Alex",
+              "last_name": "Filer",
+              "ssn": "400-01-0001",
+              "date_of_birth": "1990-06-15",
+              "is_blind": false,
+              "is_dependent": false
+            },
+            "spouse": null,
+            "w2_income": [{
+              "recipient": "primary",
+              "employer_name": "Northwind Co",
+              "employer_ein": "12-3456789",
+              "wages": 210000,
+              "federal_tax_withheld": 42000,
+              "state_tax_withheld": 0,
+              "social_security_wages": 176100,
+              "social_security_tax_withheld": 10918.2,
+              "medicare_wages": 210000,
+              "medicare_tax_withheld": 3045
+            }]
+          }
+        }
+        "#;
+
+        let review = review_tax_input_inner(json);
+        assert!(!review.ready_for_estimate);
+        assert_eq!(review.status, "unsupported");
+        assert!(review
+            .blocking_issues
+            .iter()
+            .any(|issue| issue.contains("Additional Medicare Tax")));
+    }
+
+    #[test]
+    fn review_tax_input_surfaces_hoh_and_dependent_cautions() {
+        let json = r#"
+        {
+          "input": {
+            "tax_year": 2025,
+            "filing_status": "head_of_household",
+            "primary_filer": {
+              "first_name": "Alex",
+              "last_name": "Filer",
+              "ssn": "400-01-0001",
+              "date_of_birth": "1990-06-15",
+              "is_blind": false,
+              "is_dependent": false
+            },
+            "spouse": null,
+            "dependents": [{
+              "first_name": "Pat",
+              "last_name": "Filer",
+              "ssn": "400-02-0002",
+              "date_of_birth": "1950-06-15",
+              "relationship": "parent",
+              "months_lived_in_home": 12
+            }],
+            "w2_income": [{
+              "recipient": "primary",
+              "employer_name": "Northwind Co",
+              "employer_ein": "12-3456789",
+              "wages": 60000,
+              "federal_tax_withheld": 8000,
+              "state_tax_withheld": 0,
+              "social_security_wages": 60000,
+              "social_security_tax_withheld": 3720,
+              "medicare_wages": 60000,
+              "medicare_tax_withheld": 870
+            }]
+          }
+        }
+        "#;
+
+        let review = review_tax_input_inner(json);
+        assert!(review.ready_for_estimate);
+        assert_eq!(review.status, "ready");
+        assert!(review
+            .cautions
+            .iter()
+            .any(|caution| caution.contains("Head of Household is still a manual determination")));
+        assert!(review
+            .cautions
+            .iter()
+            .any(|caution| caution.contains("does not automatically establish Head of Household")));
+    }
+
+    #[test]
+    fn compute_tax_allows_blank_optional_1099_payer_names() {
+        let json = r#"
+        {
+          "input": {
+            "tax_year": 2025,
+            "filing_status": "single",
+            "primary_filer": {
+              "first_name": "Alex",
+              "last_name": "Filer",
+              "ssn": "400-01-0001",
+              "date_of_birth": "1990-06-15",
+              "is_blind": false,
+              "is_dependent": false
+            },
+            "spouse": null,
+            "interest_income": [{
+              "recipient": "primary",
+              "payer_name": "   ",
+              "taxable_interest": 125,
+              "tax_exempt_interest": 0
+            }],
+            "dividend_income": [{
+              "recipient": "primary",
+              "payer_name": "",
+              "ordinary_dividends": 200,
+              "qualified_dividends": 100
+            }]
+          }
+        }
+        "#;
+
+        let result = compute_tax_inner(json);
+        assert!(result.success);
+        assert!(result.error.is_none());
     }
 }

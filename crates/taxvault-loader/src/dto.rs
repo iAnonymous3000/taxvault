@@ -66,6 +66,7 @@ pub struct W2IncomeDto {
 #[serde(deny_unknown_fields)]
 pub struct InterestIncomeDto {
     pub recipient: String,
+    #[serde(default)]
     pub payer_name: String,
     pub taxable_interest: Decimal,
     pub tax_exempt_interest: Decimal,
@@ -75,6 +76,7 @@ pub struct InterestIncomeDto {
 #[serde(deny_unknown_fields)]
 pub struct DividendIncomeDto {
     pub recipient: String,
+    #[serde(default)]
     pub payer_name: String,
     pub ordinary_dividends: Decimal,
     pub qualified_dividends: Decimal,

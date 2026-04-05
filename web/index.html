@@ -236,6 +236,28 @@
     </section>
 
     <section class="step-section" id="step2" aria-labelledby="incomeTitle">
+      <div class="card support-review-card" id="supportReviewCard" aria-live="polite">
+        <div class="support-review-header">
+          <div>
+            <div class="notice-eyebrow">Estimate Readiness</div>
+            <h2 class="card-title">Support Review</h2>
+            <p class="card-subtitle" id="supportReviewSummary">
+              Add at least one supported income form to see whether this draft fits TaxVault's
+              current estimate slice.
+            </p>
+          </div>
+          <span class="support-review-badge pending" id="supportReviewBadge">In Progress</span>
+        </div>
+        <div class="support-review-section hidden" id="supportReviewIssuesSection">
+          <h3 class="support-review-title">Blocking Issues</h3>
+          <ul class="support-review-list" id="supportReviewIssues"></ul>
+        </div>
+        <div class="support-review-section hidden" id="supportReviewCautionsSection">
+          <h3 class="support-review-title">Manual Checks</h3>
+          <ul class="support-review-list" id="supportReviewCautions"></ul>
+        </div>
+      </div>
+
       <div class="card">
         <div class="card-header">
           <h2 class="card-title" id="incomeTitle">W-2 Wage Statements</h2>

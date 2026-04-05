@@ -25,3 +25,28 @@ jobs:
 
       - name: Run tests
         run: cargo test --workspace
+
+  web-smoke-safari:
+    runs-on: macos-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+
+      - name: Install wasm-pack
+        run: cargo install wasm-pack --locked
+
+      - name: Enable Safari remote automation
+        run: sudo safaridriver --enable
+
+      - name: Build web bundle
+        working-directory: crates/taxvault-wasm
+        run: wasm-pack build --target web --out-dir ../../web/pkg --release
+
+      - name: Run Safari smoke tests
+        run: python3 tests/web_smoke.py
