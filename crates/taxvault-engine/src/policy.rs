@@ -106,6 +106,15 @@ mod tests {
                 additional_age_or_blind_single: Decimal::from(2000),
                 additional_age_or_blind_married: Decimal::from(1600),
             },
+            student_loan_interest: StudentLoanInterestRules {
+                max_deduction: Decimal::from(2500),
+                phaseout_start_single: Decimal::from(85000),
+                phaseout_end_single: Decimal::from(100000),
+                phaseout_start_married_filing_jointly: Decimal::from(170000),
+                phaseout_end_married_filing_jointly: Decimal::from(200000),
+                phaseout_start_head_of_household: Decimal::from(85000),
+                phaseout_end_head_of_household: Decimal::from(100000),
+            },
             qualified_dividends: QualifiedDividendRules {
                 zero_rate_threshold_single: Decimal::from(48350),
                 zero_rate_threshold_married_filing_jointly: Decimal::from(96700),
@@ -194,6 +203,7 @@ mod tests {
             interest_income: vec![],
             dividend_income: vec![],
             social_security_income: vec![],
+            adjustments: IncomeAdjustments::default(),
         }
     }
 

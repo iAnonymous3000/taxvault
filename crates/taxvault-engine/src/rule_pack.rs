@@ -6,6 +6,7 @@ use crate::tax_table::TaxTable;
 pub struct RulePack {
     pub meta: RulePackMeta,
     pub standard_deduction: StandardDeductionRules,
+    pub student_loan_interest: StudentLoanInterestRules,
     pub qualified_dividends: QualifiedDividendRules,
     pub child_tax_credit: ChildTaxCreditRules,
     pub tax_brackets: TaxBrackets,
@@ -22,6 +23,32 @@ pub struct RulePackMeta {
     pub version: String,
     pub effective_date: String,
     pub table_verified: bool,
+}
+
+pub struct StudentLoanInterestRules {
+    pub max_deduction: Decimal,
+    pub phaseout_start_single: Decimal,
+    pub phaseout_end_single: Decimal,
+    pub phaseout_start_married_filing_jointly: Decimal,
+    pub phaseout_end_married_filing_jointly: Decimal,
+    pub phaseout_start_head_of_household: Decimal,
+    pub phaseout_end_head_of_household: Decimal,
+}
+
+impl StudentLoanInterestRules {
+    pub fn phaseout_range(&self, status: &FilingStatus) -> (Decimal, Decimal) {
+        match status {
+            FilingStatus::Single => (self.phaseout_start_single, self.phaseout_end_single),
+            FilingStatus::MarriedFilingJointly => (
+                self.phaseout_start_married_filing_jointly,
+                self.phaseout_end_married_filing_jointly,
+            ),
+            FilingStatus::HeadOfHousehold => (
+                self.phaseout_start_head_of_household,
+                self.phaseout_end_head_of_household,
+            ),
+        }
+    }
 }
 
 pub struct StandardDeductionRules {

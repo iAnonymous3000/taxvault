@@ -82,3 +82,19 @@ pub struct SocialSecurityIncome {
     pub total_benefits: Decimal,
     pub voluntary_withholding: Decimal,
 }
+
+pub struct IncomeAdjustments {
+    pub traditional_ira_deduction: Decimal,
+    pub hsa_deduction: Decimal,
+    pub student_loan_interest_paid: Decimal,
+}
+
+impl Default for IncomeAdjustments {
+    fn default() -> Self {
+        Self {
+            traditional_ira_deduction: Decimal::ZERO,
+            hsa_deduction: Decimal::ZERO,
+            student_loan_interest_paid: Decimal::ZERO,
+        }
+    }
+}

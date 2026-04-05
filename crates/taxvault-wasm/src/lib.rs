@@ -40,6 +40,10 @@ struct TaxSummary {
     total_social_security_benefits: String,
     taxable_social_security_benefits: String,
     total_income: String,
+    traditional_ira_deduction: String,
+    hsa_deduction: String,
+    student_loan_interest_deduction: String,
+    total_adjustments: String,
     adjusted_gross_income: String,
     standard_deduction: String,
     total_deductions: String,
@@ -181,6 +185,10 @@ fn compute_tax_inner(json_input: &str) -> WasmResult {
         total_social_security_benefits: decimal_str(result.total_social_security_benefits),
         taxable_social_security_benefits: decimal_str(result.taxable_social_security_benefits),
         total_income: decimal_str(result.total_income),
+        traditional_ira_deduction: decimal_str(result.traditional_ira_deduction),
+        hsa_deduction: decimal_str(result.hsa_deduction),
+        student_loan_interest_deduction: decimal_str(result.student_loan_interest_deduction),
+        total_adjustments: decimal_str(result.total_adjustments),
         adjusted_gross_income: decimal_str(result.adjusted_gross_income),
         standard_deduction: decimal_str(result.standard_deduction),
         total_deductions: decimal_str(result.total_deductions),
@@ -200,7 +208,7 @@ fn compute_tax_inner(json_input: &str) -> WasmResult {
         rule_pack_version: result.rule_pack_version.clone(),
         tax_table_verified: rules.meta.table_verified,
         estimate_scope:
-            "Narrow 2025 federal estimate for supported W-2, SSA-1099, 1099-INT, and 1099-DIV scenarios only."
+            "Narrow 2025 federal estimate for supported W-2, SSA-1099, 1099-INT, 1099-DIV, and limited above-the-line deduction scenarios only."
                 .into(),
         privacy: "Runs entirely in your browser. Entered tax data stays on this page unless you choose to share it elsewhere."
             .into(),
@@ -208,6 +216,7 @@ fn compute_tax_inner(json_input: &str) -> WasmResult {
             "Not a filing product, signed return, or payment recommendation.".into(),
             "Does not support EIC, itemized deductions, pensions, IRA distributions, Schedule C, capital gains schedules, ACA credits, or most other federal schedules."
                 .into(),
+            "Traditional IRA and HSA deductions are applied exactly as entered. TaxVault does not verify employer-plan coverage, HDHP eligibility, annual limits, or excess contributions.".into(),
             "Head of Household and dependency qualification rules are not fully verified by the app.".into(),
         ],
     };
@@ -339,6 +348,15 @@ fn collect_input_cautions(facts: &TaxFacts) -> Vec<String> {
         push_unique(
             &mut cautions,
             "A parent, grandparent, or 'other' dependent does not automatically establish Head of Household. Support and household rules still need manual review.",
+        );
+    }
+
+    if facts.adjustments.traditional_ira_deduction > Decimal::ZERO
+        || facts.adjustments.hsa_deduction > Decimal::ZERO
+    {
+        push_unique(
+            &mut cautions,
+            "Traditional IRA and HSA deductions are applied exactly as entered. TaxVault does not verify employer-plan coverage, HDHP eligibility, annual limits, or excess contributions.",
         );
     }
 

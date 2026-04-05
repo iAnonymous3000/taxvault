@@ -433,6 +433,11 @@ body.gate-open {
   margin-bottom: 0;
 }
 
+.field-note {
+  display: flex;
+  align-items: flex-end;
+}
+
 .field label {
   display: block;
   margin-bottom: 0.38rem;
@@ -502,7 +507,8 @@ body.gate-open {
 .btn-add-w2:focus-visible,
 .status-option:focus-visible,
 .w2-advanced-toggle:focus-visible,
-.lines-toggle:focus-visible {
+.lines-toggle:focus-visible,
+.upload-preview-remove:focus-visible {
   outline: none;
   border-color: var(--blue-500);
   box-shadow: 0 0 0 4px var(--blue-100);
@@ -512,6 +518,16 @@ body.gate-open {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 0.85rem;
+}
+
+.inline-note {
+  min-height: 2.9rem;
+  padding: 0.72rem 0.8rem;
+  border: 1.5px solid var(--border-default);
+  border-radius: var(--radius-sm);
+  background: rgba(37, 99, 235, 0.08);
+  color: var(--text-secondary);
+  font-size: 0.82rem;
 }
 
 .checkbox-row {

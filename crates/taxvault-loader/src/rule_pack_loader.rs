@@ -1,8 +1,11 @@
 use rust_decimal::Decimal;
-use taxvault_core::{DateYmd, FilerInfo, FilerRole, FilingStatus, Ssn, TaxFacts, W2Income};
+use taxvault_core::{
+    DateYmd, FilerInfo, FilerRole, FilingStatus, IncomeAdjustments, Ssn, TaxFacts, W2Income,
+};
 use taxvault_engine::{
     compute, ChildTaxCreditRules, ComputeOptions, MedicareRules, QualifiedDividendRules, RulePack,
-    RulePackMeta, SocialSecurityRules, StandardDeductionRules, TaxBracket, TaxBrackets, TestVector,
+    RulePackMeta, SocialSecurityRules, StandardDeductionRules, StudentLoanInterestRules,
+    TaxBracket, TaxBrackets, TestVector,
 };
 
 use crate::dto::RulePackDto;
@@ -75,6 +78,23 @@ pub fn load_rule_pack(toml_content: &str, csv_content: &str) -> Result<RulePack,
             head_of_household: dto.standard_deduction.head_of_household,
             additional_age_or_blind_single: dto.standard_deduction.additional_age_or_blind_single,
             additional_age_or_blind_married: dto.standard_deduction.additional_age_or_blind_married,
+        },
+        student_loan_interest: StudentLoanInterestRules {
+            max_deduction: dto.student_loan_interest.max_deduction,
+            phaseout_start_single: dto.student_loan_interest.phaseout_start_single,
+            phaseout_end_single: dto.student_loan_interest.phaseout_end_single,
+            phaseout_start_married_filing_jointly: dto
+                .student_loan_interest
+                .phaseout_start_married_filing_jointly,
+            phaseout_end_married_filing_jointly: dto
+                .student_loan_interest
+                .phaseout_end_married_filing_jointly,
+            phaseout_start_head_of_household: dto
+                .student_loan_interest
+                .phaseout_start_head_of_household,
+            phaseout_end_head_of_household: dto
+                .student_loan_interest
+                .phaseout_end_head_of_household,
         },
         qualified_dividends: QualifiedDividendRules {
             zero_rate_threshold_single: dto.qualified_dividends.zero_rate_threshold_single,
@@ -196,6 +216,65 @@ fn validate_rule_pack(rule_pack: &RulePack) -> Result<(), LoaderError> {
     validate_non_negative(
         "standard_deduction.additional_age_or_blind_married",
         rule_pack.standard_deduction.additional_age_or_blind_married,
+    )?;
+    validate_non_negative(
+        "student_loan_interest.max_deduction",
+        rule_pack.student_loan_interest.max_deduction,
+    )?;
+    validate_non_negative(
+        "student_loan_interest.phaseout_start_single",
+        rule_pack.student_loan_interest.phaseout_start_single,
+    )?;
+    validate_non_negative(
+        "student_loan_interest.phaseout_end_single",
+        rule_pack.student_loan_interest.phaseout_end_single,
+    )?;
+    validate_non_negative(
+        "student_loan_interest.phaseout_start_married_filing_jointly",
+        rule_pack
+            .student_loan_interest
+            .phaseout_start_married_filing_jointly,
+    )?;
+    validate_non_negative(
+        "student_loan_interest.phaseout_end_married_filing_jointly",
+        rule_pack
+            .student_loan_interest
+            .phaseout_end_married_filing_jointly,
+    )?;
+    validate_non_negative(
+        "student_loan_interest.phaseout_start_head_of_household",
+        rule_pack
+            .student_loan_interest
+            .phaseout_start_head_of_household,
+    )?;
+    validate_non_negative(
+        "student_loan_interest.phaseout_end_head_of_household",
+        rule_pack
+            .student_loan_interest
+            .phaseout_end_head_of_household,
+    )?;
+    validate_threshold_range(
+        "student_loan_interest.single",
+        rule_pack.student_loan_interest.phaseout_start_single,
+        rule_pack.student_loan_interest.phaseout_end_single,
+    )?;
+    validate_threshold_range(
+        "student_loan_interest.married_filing_jointly",
+        rule_pack
+            .student_loan_interest
+            .phaseout_start_married_filing_jointly,
+        rule_pack
+            .student_loan_interest
+            .phaseout_end_married_filing_jointly,
+    )?;
+    validate_threshold_range(
+        "student_loan_interest.head_of_household",
+        rule_pack
+            .student_loan_interest
+            .phaseout_start_head_of_household,
+        rule_pack
+            .student_loan_interest
+            .phaseout_end_head_of_household,
     )?;
     validate_non_negative(
         "qualified_dividends.zero_rate_threshold_single",
@@ -365,6 +444,15 @@ fn validate_rate(name: &str, value: Decimal) -> Result<(), LoaderError> {
     Ok(())
 }
 
+fn validate_threshold_range(name: &str, start: Decimal, end: Decimal) -> Result<(), LoaderError> {
+    if end < start {
+        return Err(LoaderError::Validation(format!(
+            "{name} phaseout end must be greater than or equal to phaseout start"
+        )));
+    }
+    Ok(())
+}
+
 fn validate_brackets(label: &str, brackets: &[TaxBracket]) -> Result<(), LoaderError> {
     if brackets.is_empty() {
         return Err(LoaderError::Validation(format!(
@@ -485,6 +573,7 @@ fn build_facts_from_vector(vector: &TestVector, tax_year: u16) -> TaxFacts {
         interest_income: vec![],
         dividend_income: vec![],
         social_security_income: vec![],
+        adjustments: IncomeAdjustments::default(),
     }
 }
 
@@ -523,6 +612,15 @@ mod tests {
         head_of_household = 23625
         additional_age_or_blind_single = 2000
         additional_age_or_blind_married = 1600
+
+        [student_loan_interest]
+        max_deduction = 2500
+        phaseout_start_single = 85000
+        phaseout_end_single = 100000
+        phaseout_start_married_filing_jointly = 170000
+        phaseout_end_married_filing_jointly = 200000
+        phaseout_start_head_of_household = 85000
+        phaseout_end_head_of_household = 100000
 
         [qualified_dividends]
         zero_rate_threshold_single = 48350
@@ -611,6 +709,15 @@ mod tests {
         head_of_household = 23625
         additional_age_or_blind_single = -1
         additional_age_or_blind_married = 1600
+
+        [student_loan_interest]
+        max_deduction = 2500
+        phaseout_start_single = 85000
+        phaseout_end_single = 100000
+        phaseout_start_married_filing_jointly = 170000
+        phaseout_end_married_filing_jointly = 200000
+        phaseout_start_head_of_household = 85000
+        phaseout_end_head_of_household = 100000
 
         [qualified_dividends]
         zero_rate_threshold_single = 48350

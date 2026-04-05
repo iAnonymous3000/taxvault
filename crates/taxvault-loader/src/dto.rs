@@ -23,6 +23,7 @@ pub struct TaxFactsDto {
     pub interest_income: Option<Vec<InterestIncomeDto>>,
     pub dividend_income: Option<Vec<DividendIncomeDto>>,
     pub social_security_income: Option<Vec<SocialSecurityIncomeDto>>,
+    pub adjustments: Option<AdjustmentsDto>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -90,6 +91,17 @@ pub struct SocialSecurityIncomeDto {
     pub voluntary_withholding: Decimal,
 }
 
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct AdjustmentsDto {
+    #[serde(default)]
+    pub traditional_ira_deduction: Decimal,
+    #[serde(default)]
+    pub hsa_deduction: Decimal,
+    #[serde(default)]
+    pub student_loan_interest_paid: Decimal,
+}
+
 // ---- Rule Pack DTOs ----
 
 #[derive(Debug, Deserialize)]
@@ -97,6 +109,7 @@ pub struct SocialSecurityIncomeDto {
 pub struct RulePackDto {
     pub meta: RulePackMetaDto,
     pub standard_deduction: StandardDeductionDto,
+    pub student_loan_interest: StudentLoanInterestDto,
     pub qualified_dividends: QualifiedDividendsDto,
     pub child_tax_credit: ChildTaxCreditDto,
     pub tax_brackets: TaxBracketsDto,
@@ -134,6 +147,18 @@ pub struct QualifiedDividendsDto {
     pub fifteen_rate_threshold_single: Decimal,
     pub fifteen_rate_threshold_married_filing_jointly: Decimal,
     pub fifteen_rate_threshold_head_of_household: Decimal,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct StudentLoanInterestDto {
+    pub max_deduction: Decimal,
+    pub phaseout_start_single: Decimal,
+    pub phaseout_end_single: Decimal,
+    pub phaseout_start_married_filing_jointly: Decimal,
+    pub phaseout_end_married_filing_jointly: Decimal,
+    pub phaseout_start_head_of_household: Decimal,
+    pub phaseout_end_head_of_household: Decimal,
 }
 
 #[derive(Debug, Deserialize)]

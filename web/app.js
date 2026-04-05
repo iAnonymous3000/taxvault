@@ -45,6 +45,9 @@ const els = {
   addInterestBtn: document.getElementById("addInterestBtn"),
   dividendContainer: document.getElementById("dividendContainer"),
   addDividendBtn: document.getElementById("addDividendBtn"),
+  traditionalIraDeduction: document.getElementById("traditionalIraDeduction"),
+  hsaDeduction: document.getElementById("hsaDeduction"),
+  studentLoanInterestPaid: document.getElementById("studentLoanInterestPaid"),
   computeBtn: document.getElementById("computeBtn"),
   supportReviewCard: document.getElementById("supportReviewCard"),
   supportReviewBadge: document.getElementById("supportReviewBadge"),
@@ -942,6 +945,7 @@ function buildPayload() {
   const socialSecurityIncome = collectSocialSecurityCards(errors);
   const interestIncome = collectInterestCards(errors);
   const dividendIncome = collectDividendCards(errors);
+  const adjustments = collectAdjustments(errors);
 
   if (
     w2s.length === 0 &&
@@ -968,10 +972,49 @@ function buildPayload() {
         interest_income: interestIncome,
         dividend_income: dividendIncome,
         social_security_income: socialSecurityIncome,
+        adjustments,
       },
     },
     errors,
   };
+}
+
+function collectAdjustments(errors) {
+  const adjustments = {
+    traditional_ira_deduction: 0,
+    hsa_deduction: 0,
+    student_loan_interest_paid: 0,
+  };
+
+  const fields = [
+    {
+      key: "traditional_ira_deduction",
+      label: "Traditional IRA deduction",
+      rawValue: els.traditionalIraDeduction.value.trim(),
+    },
+    {
+      key: "hsa_deduction",
+      label: "HSA deduction",
+      rawValue: els.hsaDeduction.value.trim(),
+    },
+    {
+      key: "student_loan_interest_paid",
+      label: "Student loan interest paid",
+      rawValue: els.studentLoanInterestPaid.value.trim(),
+    },
+  ];
+
+  fields.forEach(({ key, label, rawValue }) => {
+    const value = parseMoney(rawValue, 0);
+    if (!Number.isFinite(value) || value < 0) {
+      errors.push(`${label} must be 0 or greater.`);
+      return;
+    }
+
+    adjustments[key] = value;
+  });
+
+  return adjustments;
 }
 
 function filerPayload(filer) {
@@ -1393,6 +1436,17 @@ function renderBreakdown(summary) {
       value: fmtCurrency(summary.taxable_social_security_benefits),
     },
     { label: "Total Income", value: fmtCurrency(summary.total_income), highlight: true },
+    { section: "Adjustments" },
+    {
+      label: "Traditional IRA Deduction",
+      value: fmtCurrency(summary.traditional_ira_deduction),
+    },
+    { label: "HSA Deduction", value: fmtCurrency(summary.hsa_deduction) },
+    {
+      label: "Student Loan Interest Deduction",
+      value: fmtCurrency(summary.student_loan_interest_deduction),
+    },
+    { label: "Total Adjustments", value: fmtCurrency(summary.total_adjustments), highlight: true },
     { label: "Adjusted Gross Income", value: fmtCurrency(summary.adjusted_gross_income), highlight: true },
     { section: "Deductions" },
     { label: "Standard Deduction", value: fmtCurrency(summary.standard_deduction) },
@@ -1625,6 +1679,9 @@ function clearAllData() {
   document.getElementById("sSsn").value = "";
   document.getElementById("sDob").value = "";
   document.getElementById("sBlind").checked = false;
+  els.traditionalIraDeduction.value = "";
+  els.hsaDeduction.value = "";
+  els.studentLoanInterestPaid.value = "";
 
   els.w2Container.replaceChildren();
   els.socialSecurityContainer.replaceChildren();

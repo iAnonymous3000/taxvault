@@ -41,7 +41,7 @@ pub fn compile_1040(ret: &ComputedReturn) -> FormLineMap {
     currency(&mut lines, "7", zero);
     currency(&mut lines, "8", zero);
     currency(&mut lines, "9", ret.total_income); // total income
-    currency(&mut lines, "10", zero); // adjustments
+    currency(&mut lines, "10", ret.total_adjustments); // adjustments
     currency(&mut lines, "11a", ret.adjusted_gross_income);
     currency(&mut lines, "11b", ret.adjusted_gross_income);
 
@@ -121,6 +121,10 @@ mod tests {
             total_social_security_benefits: Decimal::ZERO,
             taxable_social_security_benefits: Decimal::ZERO,
             total_income: Decimal::from(60000),
+            traditional_ira_deduction: Decimal::ZERO,
+            hsa_deduction: Decimal::ZERO,
+            student_loan_interest_deduction: Decimal::ZERO,
+            total_adjustments: Decimal::ZERO,
             adjusted_gross_income: Decimal::from(60000),
             standard_deduction: Decimal::from(15750),
             total_deductions: Decimal::from(15750),
@@ -210,8 +214,12 @@ mod tests {
         ret.total_social_security_benefits = Decimal::from(12000);
         ret.taxable_social_security_benefits = Decimal::from(3000);
         ret.total_income = Decimal::from(60525);
-        ret.adjusted_gross_income = Decimal::from(60525);
-        ret.taxable_income = Decimal::from(44775);
+        ret.traditional_ira_deduction = Decimal::from(1200);
+        ret.hsa_deduction = Decimal::from(800);
+        ret.student_loan_interest_deduction = Decimal::from(250);
+        ret.total_adjustments = Decimal::from(2250);
+        ret.adjusted_gross_income = Decimal::from(58275);
+        ret.taxable_income = Decimal::from(42525);
         ret.income_tax = Decimal::from(5140);
         ret.child_dependent_credit = Decimal::from(2000);
         ret.additional_child_tax_credit = Decimal::from(300);
@@ -243,6 +251,14 @@ mod tests {
         assert_eq!(
             form.lines["6b"],
             FormLineValue::Currency(Decimal::from(3000))
+        );
+        assert_eq!(
+            form.lines["10"],
+            FormLineValue::Currency(Decimal::from(2250))
+        );
+        assert_eq!(
+            form.lines["11a"],
+            FormLineValue::Currency(Decimal::from(58275))
         );
         assert_eq!(
             form.lines["19"],

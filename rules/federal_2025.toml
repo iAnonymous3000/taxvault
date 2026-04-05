@@ -13,6 +13,15 @@ head_of_household = 23625
 additional_age_or_blind_single = 2000
 additional_age_or_blind_married = 1600
 
+[student_loan_interest]
+max_deduction = 2500
+phaseout_start_single = 85000
+phaseout_end_single = 100000
+phaseout_start_married_filing_jointly = 170000
+phaseout_end_married_filing_jointly = 200000
+phaseout_start_head_of_household = 85000
+phaseout_end_head_of_household = 100000
+
 [qualified_dividends]
 zero_rate_threshold_single = 48350
 zero_rate_threshold_married_filing_jointly = 96700

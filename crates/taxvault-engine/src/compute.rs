@@ -27,6 +27,10 @@ pub struct ComputedReturn {
     pub total_social_security_benefits: Decimal,
     pub taxable_social_security_benefits: Decimal,
     pub total_income: Decimal,
+    pub traditional_ira_deduction: Decimal,
+    pub hsa_deduction: Decimal,
+    pub student_loan_interest_deduction: Decimal,
+    pub total_adjustments: Decimal,
     pub adjusted_gross_income: Decimal,
     pub standard_deduction: Decimal,
     pub total_deductions: Decimal,
@@ -85,6 +89,8 @@ pub fn compute(
         .iter()
         .map(|benefit| benefit.voluntary_withholding)
         .sum();
+    let traditional_ira_deduction = facts.adjustments.traditional_ira_deduction;
+    let hsa_deduction = facts.adjustments.hsa_deduction;
 
     let wages_id = tb.add("Total Wages", total_wages, "sum of W-2 box 1", vec![]);
     let taxable_interest_id = tb.add(
@@ -111,28 +117,44 @@ pub fn compute(
         "sum of SSA-1099 box 5",
         vec![],
     );
+    let ira_deduction_id = tb.add(
+        "Traditional IRA Deduction",
+        traditional_ira_deduction,
+        "Deductible traditional IRA amount entered by the user",
+        vec![],
+    );
+    let hsa_deduction_id = tb.add(
+        "HSA Deduction",
+        hsa_deduction,
+        "Deductible HSA amount entered by the user",
+        vec![],
+    );
 
     let income_before_social_security =
         total_wages + total_taxable_interest + total_ordinary_dividends;
+    let social_security_income_base =
+        income_before_social_security - traditional_ira_deduction - hsa_deduction;
     let combined_income = social_security_combined_income(
-        income_before_social_security,
+        social_security_income_base,
         total_tax_exempt_interest,
         total_social_security_benefits,
     );
     let combined_income_id = tb.add(
         "Combined Income for Social Security Worksheet",
         combined_income,
-        "AGI before Social Security + tax-exempt interest + half of benefits",
+        "Income before Social Security, minus IRA/HSA deductions, plus tax-exempt interest and half of benefits",
         vec![
             wages_id,
             taxable_interest_id,
             tax_exempt_interest_id,
             ordinary_dividends_id,
             social_security_benefits_id,
+            ira_deduction_id,
+            hsa_deduction_id,
         ],
     );
     let taxable_social_security_benefits = compute_taxable_social_security_benefits(
-        income_before_social_security,
+        social_security_income_base,
         total_tax_exempt_interest,
         total_social_security_benefits,
         &facts.filing_status,
@@ -142,7 +164,7 @@ pub fn compute(
         "Taxable Social Security Benefits",
         taxable_social_security_benefits,
         social_security_taxability_description(
-            income_before_social_security,
+            social_security_income_base,
             total_tax_exempt_interest,
             total_social_security_benefits,
             &facts.filing_status,
@@ -164,12 +186,45 @@ pub fn compute(
         ],
     );
 
-    let agi = total_income;
+    let student_loan_magi = total_income - traditional_ira_deduction - hsa_deduction;
+    let student_loan_magi_id = tb.add(
+        "MAGI for Student Loan Interest Phaseout",
+        student_loan_magi,
+        "AGI before the student loan interest deduction",
+        vec![total_income_id, ira_deduction_id, hsa_deduction_id],
+    );
+    let student_loan_interest_deduction = compute_student_loan_interest_deduction(
+        facts.adjustments.student_loan_interest_paid,
+        student_loan_magi,
+        &facts.filing_status,
+        rules,
+    );
+    let student_loan_interest_id = tb.add(
+        "Student Loan Interest Deduction",
+        student_loan_interest_deduction,
+        student_loan_interest_description(
+            facts.adjustments.student_loan_interest_paid,
+            student_loan_magi,
+            &facts.filing_status,
+            rules,
+        ),
+        vec![student_loan_magi_id],
+    );
+    let total_adjustments =
+        traditional_ira_deduction + hsa_deduction + student_loan_interest_deduction;
+    let total_adjustments_id = tb.add(
+        "Total Adjustments",
+        total_adjustments,
+        "Line 10 = IRA deduction + HSA deduction + deductible student loan interest",
+        vec![ira_deduction_id, hsa_deduction_id, student_loan_interest_id],
+    );
+
+    let agi = total_income - total_adjustments;
     let agi_id = tb.add(
         "AGI",
         agi,
-        "Line 11 = Line 9 (no adjustments)",
-        vec![total_income_id],
+        "Line 11 = Line 9 minus adjustments",
+        vec![total_income_id, total_adjustments_id],
     );
 
     // Standard deduction (base + age 65+ / blind adjustments)
@@ -367,6 +422,10 @@ pub fn compute(
         total_social_security_benefits,
         taxable_social_security_benefits,
         total_income,
+        traditional_ira_deduction,
+        hsa_deduction,
+        student_loan_interest_deduction,
+        total_adjustments,
         adjusted_gross_income: agi,
         standard_deduction: std_ded,
         total_deductions,
@@ -434,6 +493,55 @@ fn compute_ordinary_income_tax(
             .ok_or(ComputeError::TaxTableLookupFailed { taxable_income })
     } else {
         compute_bracket_tax(taxable_income, filing_status, &rules.tax_brackets)
+    }
+}
+
+fn compute_student_loan_interest_deduction(
+    interest_paid: Decimal,
+    modified_adjusted_gross_income: Decimal,
+    filing_status: &FilingStatus,
+    rules: &RulePack,
+) -> Decimal {
+    if interest_paid <= Decimal::ZERO {
+        return Decimal::ZERO;
+    }
+
+    let deduction = interest_paid.min(rules.student_loan_interest.max_deduction);
+    let (phaseout_start, phaseout_end) = rules.student_loan_interest.phaseout_range(filing_status);
+
+    if modified_adjusted_gross_income <= phaseout_start {
+        deduction
+    } else if modified_adjusted_gross_income >= phaseout_end {
+        Decimal::ZERO
+    } else {
+        let remaining_phaseout = phaseout_end - modified_adjusted_gross_income;
+        let phaseout_span = phaseout_end - phaseout_start;
+        (deduction * remaining_phaseout / phaseout_span).round_dp(2)
+    }
+}
+
+fn student_loan_interest_description(
+    interest_paid: Decimal,
+    modified_adjusted_gross_income: Decimal,
+    filing_status: &FilingStatus,
+    rules: &RulePack,
+) -> String {
+    let (phaseout_start, phaseout_end) = rules.student_loan_interest.phaseout_range(filing_status);
+
+    if interest_paid <= Decimal::ZERO {
+        "No student loan interest entered".into()
+    } else if modified_adjusted_gross_income <= phaseout_start {
+        format!(
+            "Full deduction allowed because MAGI {modified_adjusted_gross_income} is at or below the phaseout start {phaseout_start}"
+        )
+    } else if modified_adjusted_gross_income >= phaseout_end {
+        format!(
+            "No deduction allowed because MAGI {modified_adjusted_gross_income} is at or above the phaseout end {phaseout_end}"
+        )
+    } else {
+        format!(
+            "Deduction reduced because MAGI {modified_adjusted_gross_income} falls inside the phaseout range {phaseout_start}-{phaseout_end}"
+        )
     }
 }
 
@@ -654,6 +762,15 @@ mod tests {
                 additional_age_or_blind_single: Decimal::from(2000),
                 additional_age_or_blind_married: Decimal::from(1600),
             },
+            student_loan_interest: StudentLoanInterestRules {
+                max_deduction: Decimal::from(2500),
+                phaseout_start_single: Decimal::from(85000),
+                phaseout_end_single: Decimal::from(100000),
+                phaseout_start_married_filing_jointly: Decimal::from(170000),
+                phaseout_end_married_filing_jointly: Decimal::from(200000),
+                phaseout_start_head_of_household: Decimal::from(85000),
+                phaseout_end_head_of_household: Decimal::from(100000),
+            },
             qualified_dividends: QualifiedDividendRules {
                 zero_rate_threshold_single: Decimal::from(48350),
                 zero_rate_threshold_married_filing_jointly: Decimal::from(96700),
@@ -734,6 +851,7 @@ mod tests {
             interest_income: vec![],
             dividend_income: vec![],
             social_security_income: vec![],
+            adjustments: IncomeAdjustments::default(),
         };
 
         // Without override -> refused
@@ -785,6 +903,15 @@ mod tests {
                     head_of_household: Decimal::ZERO,
                     additional_age_or_blind_single: Decimal::ZERO,
                     additional_age_or_blind_married: Decimal::ZERO,
+                },
+                student_loan_interest: crate::rule_pack::StudentLoanInterestRules {
+                    max_deduction: Decimal::from(2500),
+                    phaseout_start_single: Decimal::from(85000),
+                    phaseout_end_single: Decimal::from(100000),
+                    phaseout_start_married_filing_jointly: Decimal::from(170000),
+                    phaseout_end_married_filing_jointly: Decimal::from(200000),
+                    phaseout_start_head_of_household: Decimal::from(85000),
+                    phaseout_end_head_of_household: Decimal::from(100000),
                 },
                 qualified_dividends: crate::rule_pack::QualifiedDividendRules {
                     zero_rate_threshold_single: Decimal::ZERO,
@@ -860,6 +987,15 @@ mod tests {
                     additional_age_or_blind_single: Decimal::ZERO,
                     additional_age_or_blind_married: Decimal::ZERO,
                 },
+                student_loan_interest: crate::rule_pack::StudentLoanInterestRules {
+                    max_deduction: Decimal::from(2500),
+                    phaseout_start_single: Decimal::from(85000),
+                    phaseout_end_single: Decimal::from(100000),
+                    phaseout_start_married_filing_jointly: Decimal::from(170000),
+                    phaseout_end_married_filing_jointly: Decimal::from(200000),
+                    phaseout_start_head_of_household: Decimal::from(85000),
+                    phaseout_end_head_of_household: Decimal::from(100000),
+                },
                 qualified_dividends: crate::rule_pack::QualifiedDividendRules {
                     zero_rate_threshold_single: Decimal::ZERO,
                     zero_rate_threshold_married_filing_jointly: Decimal::ZERO,
@@ -899,5 +1035,87 @@ mod tests {
         );
 
         assert_eq!(taxable, Decimal::from(8500));
+    }
+
+    #[test]
+    fn student_loan_interest_deduction_phases_out() {
+        use crate::rule_pack::StudentLoanInterestRules;
+
+        let rules = RulePack {
+            meta: crate::rule_pack::RulePackMeta {
+                tax_year: 2025,
+                jurisdiction: "federal".into(),
+                version: "1.0.0".into(),
+                effective_date: "2025-01-01".into(),
+                table_verified: true,
+            },
+            standard_deduction: crate::rule_pack::StandardDeductionRules {
+                single: Decimal::ZERO,
+                married_filing_jointly: Decimal::ZERO,
+                head_of_household: Decimal::ZERO,
+                additional_age_or_blind_single: Decimal::ZERO,
+                additional_age_or_blind_married: Decimal::ZERO,
+            },
+            student_loan_interest: StudentLoanInterestRules {
+                max_deduction: Decimal::from(2500),
+                phaseout_start_single: Decimal::from(85000),
+                phaseout_end_single: Decimal::from(100000),
+                phaseout_start_married_filing_jointly: Decimal::from(170000),
+                phaseout_end_married_filing_jointly: Decimal::from(200000),
+                phaseout_start_head_of_household: Decimal::from(85000),
+                phaseout_end_head_of_household: Decimal::from(100000),
+            },
+            qualified_dividends: crate::rule_pack::QualifiedDividendRules {
+                zero_rate_threshold_single: Decimal::ZERO,
+                zero_rate_threshold_married_filing_jointly: Decimal::ZERO,
+                zero_rate_threshold_head_of_household: Decimal::ZERO,
+                fifteen_rate_threshold_single: Decimal::ZERO,
+                fifteen_rate_threshold_married_filing_jointly: Decimal::ZERO,
+                fifteen_rate_threshold_head_of_household: Decimal::ZERO,
+            },
+            child_tax_credit: crate::rule_pack::ChildTaxCreditRules {
+                qualifying_child_credit: Decimal::ZERO,
+                other_dependent_credit: Decimal::ZERO,
+                refundable_credit_per_child: Decimal::ZERO,
+                phaseout_threshold_married_filing_jointly: Decimal::ZERO,
+                phaseout_threshold_other: Decimal::ZERO,
+                phaseout_increment: Decimal::ONE,
+                phaseout_rate: Decimal::ZERO,
+                refundable_earned_income_threshold: Decimal::ZERO,
+                refundable_withholding_floor: Decimal::ZERO,
+            },
+            tax_brackets: crate::rule_pack::TaxBrackets {
+                single: vec![],
+                married_filing_jointly: vec![],
+                head_of_household: vec![],
+            },
+            tax_table: crate::tax_table::TaxTable { rows: vec![] },
+            social_security: crate::rule_pack::SocialSecurityRules {
+                wage_base: Decimal::ZERO,
+                tax_rate: Decimal::ZERO,
+                benefits_50_threshold_single: Decimal::ZERO,
+                benefits_50_threshold_married_filing_jointly: Decimal::ZERO,
+                benefits_85_threshold_single: Decimal::ZERO,
+                benefits_85_threshold_married_filing_jointly: Decimal::ZERO,
+            },
+            medicare: crate::rule_pack::MedicareRules {
+                tax_rate: Decimal::ZERO,
+                additional_rate: Decimal::ZERO,
+                additional_threshold_single: Decimal::ZERO,
+                additional_threshold_mfj: Decimal::ZERO,
+                employer_withholding_threshold: Decimal::ZERO,
+            },
+            age_threshold: taxvault_core::DateYmd::new(1961, 1, 2).unwrap(),
+            test_vectors: vec![],
+        };
+
+        let deduction = compute_student_loan_interest_deduction(
+            Decimal::from(2500),
+            Decimal::from(92500),
+            &FilingStatus::Single,
+            &rules,
+        );
+
+        assert_eq!(deduction, Decimal::from(1250));
     }
 }

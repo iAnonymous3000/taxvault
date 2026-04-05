@@ -3,7 +3,8 @@ use std::collections::HashSet;
 
 use crate::error::ValidationError;
 use crate::filer::{
-    DividendIncome, FilerRole, FilingStatus, InterestIncome, SocialSecurityIncome, W2Income,
+    DividendIncome, FilerRole, FilingStatus, IncomeAdjustments, InterestIncome,
+    SocialSecurityIncome, W2Income,
 };
 use crate::tax_facts::TaxFacts;
 
@@ -141,6 +142,8 @@ impl TaxFacts {
 
             validate_social_security_amounts(benefit, &mut errors);
         }
+
+        validate_adjustment_amounts(&self.adjustments, &mut errors);
 
         if errors.is_empty() {
             Ok(())
@@ -301,6 +304,29 @@ fn validate_social_security_amounts(
     }
 }
 
+fn validate_adjustment_amounts(adjustments: &IncomeAdjustments, errors: &mut Vec<ValidationError>) {
+    let fields: &[(&str, &Decimal)] = &[
+        (
+            "adjustments.traditional_ira_deduction",
+            &adjustments.traditional_ira_deduction,
+        ),
+        ("adjustments.hsa_deduction", &adjustments.hsa_deduction),
+        (
+            "adjustments.student_loan_interest_paid",
+            &adjustments.student_loan_interest_paid,
+        ),
+    ];
+
+    for (name, value) in fields {
+        if *value < &Decimal::ZERO {
+            errors.push(ValidationError::NegativeAmount {
+                field: (*name).to_string(),
+                value: value.to_string(),
+            });
+        }
+    }
+}
+
 fn validate_ein(ein: &str, errors: &mut Vec<ValidationError>) {
     // EIN format: ##-#######. Validate on raw bytes so malformed UTF-8
     // boundaries cannot panic string slicing.
@@ -332,7 +358,10 @@ fn display_payer_name<'a>(payer_name: &'a str, fallback: &'a str) -> &'a str {
 mod tests {
     use super::*;
     use crate::date::DateYmd;
-    use crate::filer::{DividendIncome, FilerInfo, InterestIncome, SocialSecurityIncome, W2Income};
+    use crate::filer::{
+        DividendIncome, FilerInfo, IncomeAdjustments, InterestIncome, SocialSecurityIncome,
+        W2Income,
+    };
     use crate::ssn::Ssn;
     use rust_decimal::Decimal;
 
@@ -414,6 +443,7 @@ mod tests {
             interest_income: vec![],
             dividend_income: vec![],
             social_security_income: vec![],
+            adjustments: IncomeAdjustments::default(),
         }
     }
 
@@ -475,6 +505,7 @@ mod tests {
             interest_income: vec![],
             dividend_income: vec![],
             social_security_income: vec![],
+            adjustments: IncomeAdjustments::default(),
         };
         let errs = facts.validate_structure().unwrap_err();
         assert!(errs
@@ -494,6 +525,7 @@ mod tests {
             interest_income: vec![test_interest(FilerRole::Primary)],
             dividend_income: vec![],
             social_security_income: vec![],
+            adjustments: IncomeAdjustments::default(),
         };
 
         assert!(facts.validate_structure().is_ok());
@@ -511,6 +543,7 @@ mod tests {
             interest_income: vec![],
             dividend_income: vec![],
             social_security_income: vec![test_social_security(FilerRole::Primary)],
+            adjustments: IncomeAdjustments::default(),
         };
 
         assert!(facts.validate_structure().is_ok());
@@ -555,6 +588,28 @@ mod tests {
         assert!(errs
             .iter()
             .any(|e| matches!(e, ValidationError::NegativeAmount { .. })));
+    }
+
+    #[test]
+    fn negative_adjustment_rejected() {
+        let facts = TaxFacts {
+            adjustments: IncomeAdjustments {
+                traditional_ira_deduction: Decimal::from(-1),
+                ..IncomeAdjustments::default()
+            },
+            ..facts_with_w2s(
+                FilingStatus::Single,
+                None,
+                vec![test_w2(FilerRole::Primary)],
+            )
+        };
+
+        let errs = facts.validate_structure().unwrap_err();
+        assert!(errs.iter().any(|e| matches!(
+            e,
+            ValidationError::NegativeAmount { field, .. }
+            if field == "adjustments.traditional_ira_deduction"
+        )));
     }
 
     #[test]
@@ -611,6 +666,7 @@ mod tests {
             interest_income: vec![],
             dividend_income: vec![],
             social_security_income: vec![],
+            adjustments: IncomeAdjustments::default(),
         };
         let errs = facts.validate_structure().unwrap_err();
         assert!(errs
@@ -695,6 +751,7 @@ mod tests {
             interest_income: vec![test_interest(FilerRole::Spouse)],
             dividend_income: vec![],
             social_security_income: vec![],
+            adjustments: IncomeAdjustments::default(),
         };
         let errs = facts.validate_structure().unwrap_err();
         assert!(errs.iter().any(|e| matches!(
@@ -718,6 +775,7 @@ mod tests {
             interest_income: vec![],
             dividend_income: vec![dividend],
             social_security_income: vec![],
+            adjustments: IncomeAdjustments::default(),
         };
 
         let errs = facts.validate_structure().unwrap_err();
@@ -739,6 +797,7 @@ mod tests {
             interest_income: vec![],
             dividend_income: vec![],
             social_security_income: vec![test_social_security(FilerRole::Spouse)],
+            adjustments: IncomeAdjustments::default(),
         };
         let errs = facts.validate_structure().unwrap_err();
         assert!(errs.iter().any(|e| matches!(
@@ -762,6 +821,7 @@ mod tests {
             interest_income: vec![interest],
             dividend_income: vec![],
             social_security_income: vec![],
+            adjustments: IncomeAdjustments::default(),
         };
         assert!(facts.validate_structure().is_ok());
     }
@@ -780,6 +840,7 @@ mod tests {
             interest_income: vec![],
             dividend_income: vec![dividend],
             social_security_income: vec![],
+            adjustments: IncomeAdjustments::default(),
         };
         assert!(facts.validate_structure().is_ok());
     }
@@ -799,6 +860,7 @@ mod tests {
             interest_income: vec![],
             dividend_income: vec![dividend],
             social_security_income: vec![],
+            adjustments: IncomeAdjustments::default(),
         };
         let errs = facts.validate_structure().unwrap_err();
         assert!(errs.iter().any(|e| matches!(
@@ -823,6 +885,7 @@ mod tests {
             interest_income: vec![],
             dividend_income: vec![],
             social_security_income: vec![benefit],
+            adjustments: IncomeAdjustments::default(),
         };
 
         let errs = facts.validate_structure().unwrap_err();

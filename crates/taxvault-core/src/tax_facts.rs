@@ -1,6 +1,6 @@
 use crate::filer::{
-    Dependent, DividendIncome, FilerInfo, FilerRole, FilingStatus, InterestIncome,
-    SocialSecurityIncome, W2Income,
+    Dependent, DividendIncome, FilerInfo, FilerRole, FilingStatus, IncomeAdjustments,
+    InterestIncome, SocialSecurityIncome, W2Income,
 };
 
 pub struct TaxFacts {
@@ -13,6 +13,7 @@ pub struct TaxFacts {
     pub interest_income: Vec<InterestIncome>,
     pub dividend_income: Vec<DividendIncome>,
     pub social_security_income: Vec<SocialSecurityIncome>,
+    pub adjustments: IncomeAdjustments,
 }
 
 impl TaxFacts {

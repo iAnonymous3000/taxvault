@@ -1,8 +1,9 @@
+use rust_decimal::Decimal;
 use taxvault_core::*;
 
 use crate::dto::{
-    DependentDto, DividendIncomeDto, FilerInfoDto, InterestIncomeDto, SocialSecurityIncomeDto,
-    TaxFactsDto, TaxFactsInputFile, W2IncomeDto,
+    AdjustmentsDto, DependentDto, DividendIncomeDto, FilerInfoDto, InterestIncomeDto,
+    SocialSecurityIncomeDto, TaxFactsDto, TaxFactsInputFile, W2IncomeDto,
 };
 use crate::error::LoaderError;
 use crate::parse::{parse_date, parse_filing_status};
@@ -47,6 +48,11 @@ fn convert_tax_facts(dto: TaxFactsDto) -> Result<TaxFacts, LoaderError> {
         .into_iter()
         .map(convert_social_security)
         .collect::<Result<Vec<_>, _>>()?;
+    let adjustments = convert_adjustments(dto.adjustments.unwrap_or(AdjustmentsDto {
+        traditional_ira_deduction: Decimal::ZERO,
+        hsa_deduction: Decimal::ZERO,
+        student_loan_interest_paid: Decimal::ZERO,
+    }));
 
     Ok(TaxFacts {
         tax_year: dto.tax_year,
@@ -58,6 +64,7 @@ fn convert_tax_facts(dto: TaxFactsDto) -> Result<TaxFacts, LoaderError> {
         interest_income,
         dividend_income,
         social_security_income,
+        adjustments,
     })
 }
 
@@ -162,6 +169,14 @@ fn convert_social_security(
     })
 }
 
+fn convert_adjustments(dto: AdjustmentsDto) -> IncomeAdjustments {
+    IncomeAdjustments {
+        traditional_ira_deduction: dto.traditional_ira_deduction,
+        hsa_deduction: dto.hsa_deduction,
+        student_loan_interest_paid: dto.student_loan_interest_paid,
+    }
+}
+
 fn parse_recipient(input: &str, source: &str) -> Result<FilerRole, LoaderError> {
     match input {
         "primary" => Ok(FilerRole::Primary),
@@ -174,6 +189,7 @@ fn parse_recipient(input: &str, source: &str) -> Result<FilerRole, LoaderError> 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use rust_decimal::Decimal;
 
     #[test]
     fn rejects_unknown_input_fields() {
@@ -293,5 +309,43 @@ mod tests {
         let facts = load_tax_facts(json).expect("should accept dividend input without payer_name");
         assert_eq!(facts.dividend_income.len(), 1);
         assert!(facts.dividend_income[0].payer_name.is_empty());
+    }
+
+    #[test]
+    fn accepts_omitted_adjustments() {
+        let json = r#"
+        {
+          "input": {
+            "tax_year": 2025,
+            "filing_status": "single",
+            "primary_filer": {
+              "first_name": "Test",
+              "last_name": "Filer",
+              "ssn": "400-01-0001",
+              "date_of_birth": "1990-06-15",
+              "is_blind": false,
+              "is_dependent": false
+            },
+            "spouse": null,
+            "w2_income": [{
+              "recipient": "primary",
+              "employer_name": "Test Corp",
+              "employer_ein": "12-3456789",
+              "wages": 60000,
+              "federal_tax_withheld": 8000,
+              "state_tax_withheld": 0,
+              "social_security_wages": 60000,
+              "social_security_tax_withheld": 3720,
+              "medicare_wages": 60000,
+              "medicare_tax_withheld": 870
+            }]
+          }
+        }
+        "#;
+
+        let facts = load_tax_facts(json).expect("should accept input without adjustments");
+        assert_eq!(facts.adjustments.traditional_ira_deduction, Decimal::ZERO);
+        assert_eq!(facts.adjustments.hsa_deduction, Decimal::ZERO);
+        assert_eq!(facts.adjustments.student_loan_interest_paid, Decimal::ZERO);
     }
 }
