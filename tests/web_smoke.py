@@ -250,6 +250,17 @@ class BrowserSession:
             )
         )
 
+    def is_disabled(self, selector: str) -> bool:
+        return bool(
+            self.execute(
+                """
+                const element = document.querySelector(arguments[0]);
+                return Boolean(element && element.disabled);
+                """,
+                [selector],
+            )
+        )
+
 
 class WebSmokeTests(unittest.TestCase):
     @classmethod
@@ -315,26 +326,23 @@ class WebSmokeTests(unittest.TestCase):
         self.browser.set_value("#w2-1-med-wages", wages)
         self.browser.set_value("#w2-1-med-wh", "870")
 
-    def test_supported_return_shows_ready_review_and_results(self):
+    def test_supported_return_stays_locked_until_tax_table_review_is_recorded(self):
         self.open_app()
         self.fill_step1_single()
         self.add_supported_w2()
 
         self.browser.wait_for(
-            lambda: self.browser.text("#supportReviewBadge") == "Ready",
-            "support review never reached Ready",
+            lambda: self.browser.text("#supportReviewBadge") == "Needs Attention",
+            "support review never reached Needs Attention",
         )
         self.assertIn(
-            "fits TaxVault's current supported estimate slice",
+            "estimate calculations are locked",
             self.browser.text("#supportReviewSummary"),
         )
-
-        self.browser.click("#computeBtn")
-        self.browser.wait_for(
-            lambda: self.browser.class_list_contains("#step3", "active"),
-            "result step never became active",
+        self.assertTrue(
+            any("marked unverified" in item for item in self.browser.texts("#supportReviewIssues li"))
         )
-        self.assertIn("Estimated Federal Refund", self.browser.text("#resultHero"))
+        self.assertTrue(self.browser.is_disabled("#computeBtn"))
 
     def test_unsupported_return_shows_blocking_issue_before_compute(self):
         self.open_app()
@@ -357,13 +365,7 @@ class WebSmokeTests(unittest.TestCase):
         self.assertTrue(
             any("Additional Medicare Tax" in item for item in self.browser.texts("#supportReviewIssues li"))
         )
-
-        self.browser.click("#computeBtn")
-        self.browser.wait_for(
-            lambda: "outside TaxVault's supported estimate slice" in self.browser.text("#error"),
-            "unsupported compute error never appeared",
-        )
-        self.assertTrue(self.browser.class_list_contains("#step2", "active"))
+        self.assertTrue(self.browser.is_disabled("#computeBtn"))
 
     def test_head_of_household_parent_case_surfaces_manual_review_caution(self):
         self.open_app()
@@ -386,8 +388,11 @@ class WebSmokeTests(unittest.TestCase):
         self.add_supported_w2()
 
         self.browser.wait_for(
-            lambda: self.browser.text("#supportReviewBadge") == "Ready",
-            "Head of Household review never reached Ready",
+            lambda: self.browser.text("#supportReviewBadge") == "Needs Attention",
+            "Head of Household review never reached Needs Attention",
+        )
+        self.assertTrue(
+            any("marked unverified" in item for item in self.browser.texts("#supportReviewIssues li"))
         )
         cautions = self.browser.texts("#supportReviewCautions li")
         self.assertTrue(
@@ -396,6 +401,7 @@ class WebSmokeTests(unittest.TestCase):
         self.assertTrue(
             any("does not automatically establish Head of Household" in item for item in cautions)
         )
+        self.assertTrue(self.browser.is_disabled("#computeBtn"))
 
 
 if __name__ == "__main__":

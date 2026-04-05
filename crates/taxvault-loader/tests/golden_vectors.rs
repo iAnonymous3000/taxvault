@@ -1,4 +1,5 @@
 use rust_decimal::Decimal;
+use taxvault_core::FilingStatus;
 use taxvault_engine::{compute, validate_supported_slice, ComputeOptions};
 use taxvault_loader::{load_rule_pack, load_tax_facts};
 
@@ -273,20 +274,24 @@ fn mfj_two_w2s_two_children_70k() {
 }
 
 #[test]
-fn verified_table_works_for_sub_100k() {
+fn unverified_table_blocks_sub_100k_without_override() {
     let json = include_str!("../../../tests/golden_vectors/single_w2_60k.json");
     let rules = load_rules();
     let facts = load_tax_facts(json).expect("facts should load");
 
-    // Table is now verified, so this should succeed even without the override
+    assert!(
+        !rules.meta.table_verified,
+        "embedded tax table should stay locked until a formal review is recorded"
+    );
+
     let options = ComputeOptions {
         allow_unverified_table: false,
     };
     let result = compute(&facts, &rules, &options);
-    assert!(
-        result.is_ok(),
-        "verified table should work for <$100k taxable income"
-    );
+    assert!(matches!(
+        result,
+        Err(taxvault_engine::ComputeError::UnverifiedTaxTable)
+    ));
 }
 
 #[test]
@@ -302,6 +307,41 @@ fn unverified_table_not_needed_for_100k_plus() {
     assert!(
         result.is_ok(),
         "should succeed without unverified table for >=$100k taxable income"
+    );
+}
+
+#[test]
+fn opening_tax_table_rows_match_irs_reference_values() {
+    let rules = load_rules();
+    let table = &rules.tax_table;
+
+    assert_eq!(
+        table.lookup(Decimal::from(4), &FilingStatus::Single),
+        Some(Decimal::ZERO)
+    );
+    assert_eq!(
+        table.lookup(Decimal::from(10), &FilingStatus::Single),
+        Some(Decimal::ONE)
+    );
+    assert_eq!(
+        table.lookup(Decimal::from(20), &FilingStatus::Single),
+        Some(Decimal::from(2))
+    );
+    assert_eq!(
+        table.lookup(Decimal::from(30), &FilingStatus::Single),
+        Some(Decimal::from(4))
+    );
+    assert_eq!(
+        table.lookup(Decimal::from(60), &FilingStatus::Single),
+        Some(Decimal::from(6))
+    );
+    assert_eq!(
+        table.lookup(Decimal::from(25_325), &FilingStatus::MarriedFilingJointly),
+        Some(Decimal::from(2562))
+    );
+    assert_eq!(
+        table.lookup(Decimal::from(25_325), &FilingStatus::HeadOfHousehold),
+        Some(Decimal::from(2699))
     );
 }
 

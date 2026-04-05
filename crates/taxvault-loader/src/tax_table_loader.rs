@@ -2,15 +2,11 @@ use rust_decimal::Decimal;
 use taxvault_engine::{TaxTable, TaxTableRow};
 
 use crate::error::LoaderError;
+use crate::parse::parse_date;
 
 /// Load a tax table from CSV content. Returns the table and whether it's verified.
 pub fn load_tax_table(csv_content: &str) -> Result<(TaxTable, bool), LoaderError> {
-    let mut verified = true;
-
-    // Check for placeholder header
-    if csv_content.contains("PLACEHOLDER") {
-        verified = false;
-    }
+    let verified = parse_verification_status(csv_content)?;
 
     // Strip comment lines
     let clean: String = csv_content
@@ -60,6 +56,82 @@ pub fn load_tax_table(csv_content: &str) -> Result<(TaxTable, bool), LoaderError
     validate_tax_table(&rows)?;
 
     Ok((TaxTable { rows }, verified))
+}
+
+#[derive(Default)]
+struct TaxTableVerificationMetadata {
+    status: Option<String>,
+    source_reference: Option<String>,
+    reviewed_by: Option<String>,
+    reviewed_at: Option<String>,
+    method: Option<String>,
+}
+
+fn parse_verification_status(csv_content: &str) -> Result<bool, LoaderError> {
+    if csv_content.contains("PLACEHOLDER") {
+        return Ok(false);
+    }
+
+    let mut metadata = TaxTableVerificationMetadata::default();
+
+    for line in csv_content.lines().filter(|line| line.starts_with('#')) {
+        let body = line.trim_start_matches('#').trim();
+        let Some((key, value)) = body.split_once('=') else {
+            continue;
+        };
+
+        let key = key.trim();
+        let value = value.trim();
+
+        match key {
+            "verification.status" => metadata.status = Some(value.to_string()),
+            "verification.source_reference" => metadata.source_reference = Some(value.to_string()),
+            "verification.reviewed_by" => metadata.reviewed_by = Some(value.to_string()),
+            "verification.reviewed_at" => metadata.reviewed_at = Some(value.to_string()),
+            "verification.method" => metadata.method = Some(value.to_string()),
+            _ => {}
+        }
+    }
+
+    match metadata.status.as_deref() {
+        None | Some("unverified") => Ok(false),
+        Some("verified") => {
+            require_verification_field(
+                "verification.source_reference",
+                metadata.source_reference.as_deref(),
+            )?;
+            require_verification_field(
+                "verification.reviewed_by",
+                metadata.reviewed_by.as_deref(),
+            )?;
+            let reviewed_at = require_verification_field(
+                "verification.reviewed_at",
+                metadata.reviewed_at.as_deref(),
+            )?;
+            parse_date(reviewed_at).map_err(|error| {
+                LoaderError::Validation(format!(
+                    "verification.reviewed_at must be YYYY-MM-DD: {error}"
+                ))
+            })?;
+            require_verification_field("verification.method", metadata.method.as_deref())?;
+            Ok(true)
+        }
+        Some(other) => Err(LoaderError::Validation(format!(
+            "verification.status must be 'verified' or 'unverified', got '{other}'"
+        ))),
+    }
+}
+
+fn require_verification_field<'a>(
+    field: &str,
+    value: Option<&'a str>,
+) -> Result<&'a str, LoaderError> {
+    match value.map(str::trim).filter(|value| !value.is_empty()) {
+        Some(value) => Ok(value),
+        None => Err(LoaderError::Validation(format!(
+            "{field} is required when verification.status=verified"
+        ))),
+    }
 }
 
 fn validate_tax_table(rows: &[TaxTableRow]) -> Result<(), LoaderError> {
@@ -150,5 +222,48 @@ mod tests {
             Err(error) => error,
         };
         assert!(matches!(error, LoaderError::Validation(_)));
+    }
+
+    #[test]
+    fn table_is_unverified_without_explicit_review_metadata() {
+        let csv = concat!(
+            "# 2025 Federal Tax Table\n",
+            "income_at_least,income_less_than,tax_single,tax_mfj,tax_hoh\n",
+            "0,100000,3,3,3\n"
+        );
+
+        let (_, verified) = load_tax_table(csv).expect("table should load");
+        assert!(!verified);
+    }
+
+    #[test]
+    fn verified_status_requires_review_metadata() {
+        let csv = concat!(
+            "# verification.status=verified\n",
+            "income_at_least,income_less_than,tax_single,tax_mfj,tax_hoh\n",
+            "0,100000,3,3,3\n"
+        );
+
+        let error = match load_tax_table(csv) {
+            Ok(_) => panic!("verified table metadata should be enforced"),
+            Err(error) => error,
+        };
+        assert!(matches!(error, LoaderError::Validation(_)));
+    }
+
+    #[test]
+    fn verified_table_with_review_metadata_sets_verified_flag() {
+        let csv = concat!(
+            "# verification.status=verified\n",
+            "# verification.source_reference=IRS 2025 Form 1040 Tax Table\n",
+            "# verification.reviewed_by=Release Approver\n",
+            "# verification.reviewed_at=2026-04-05\n",
+            "# verification.method=Compared generated rows against the published IRS table.\n",
+            "income_at_least,income_less_than,tax_single,tax_mfj,tax_hoh\n",
+            "0,100000,3,3,3\n"
+        );
+
+        let (_, verified) = load_tax_table(csv).expect("table should load");
+        assert!(verified);
     }
 }

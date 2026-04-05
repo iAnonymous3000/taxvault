@@ -92,9 +92,9 @@ Tax Vault includes Safari-based smoke tests for the browser flow in `tests/web_s
 
 They currently cover:
 
-- the disclaimer gate and supported W-2 happy path
+- the disclaimer gate and supported W-2 draft lock when the tax table is unverified
 - pre-compute unsupported-case blocking for Additional Medicare Tax
-- Head of Household manual-review cautions
+- Head of Household manual-review cautions while estimates remain locked
 
 To run them locally on macOS:
 
@@ -107,6 +107,20 @@ python3 tests/web_smoke.py
 ```
 
 Safari's `Allow remote automation` setting must be enabled for WebDriver control.
+
+## Critical Software Controls
+
+Tax Vault is still an estimate-only product, not filing-grade software.
+
+The checked-in 2025 tax table is intentionally marked `unverified` until a named reviewer records formal signoff in `tax-table/federal_2025_table.csv`. The browser app should remain locked for estimate calculations until that review is complete.
+
+Use these docs before any public release:
+
+- `docs/production-readiness.md`
+- `docs/rule-pack-verification.md`
+- `docs/tax-table-review-2025.md`
+- `docs/release-checklist.md`
+- `docs/incident-runbook.md`
 
 ## Deploy To GitHub Pages
 

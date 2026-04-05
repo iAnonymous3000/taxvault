@@ -154,6 +154,20 @@ fn compute_tax_inner(json_input: &str) -> WasmResult {
         };
     }
 
+    if !rules.meta.table_verified {
+        return WasmResult {
+            success: false,
+            error: Some(
+                "TaxVault is locked because the embedded 2025 federal tax table does not have recorded verification metadata yet."
+                    .into(),
+            ),
+            summary: None,
+            form: None,
+            meta: None,
+            trace: None,
+        };
+    }
+
     // Fail closed if a future embedded tax table is not verified.
     let options = ComputeOptions::default();
     let result = match compute(&facts, rules, &options) {
@@ -288,6 +302,21 @@ fn review_tax_input_inner(json_input: &str) -> InputReview {
         };
     }
 
+    if !rules.meta.table_verified {
+        return InputReview {
+            ready_for_estimate: false,
+            status: "attention".into(),
+            summary:
+                "TaxVault reviewed the draft, but estimate calculations are locked until the embedded 2025 tax table has recorded verification."
+                    .into(),
+            blocking_issues: vec![
+                "Embedded 2025 federal tax table is marked unverified. Record formal reviewer signoff before using this build for public estimates."
+                    .into(),
+            ],
+            cautions,
+        };
+    }
+
     let summary = if cautions.is_empty() {
         "This draft fits TaxVault's current supported estimate slice.".into()
     } else {
@@ -416,22 +445,38 @@ mod tests {
     use super::*;
 
     #[test]
-    fn compute_tax_succeeds_for_valid_vector() {
+    fn compute_tax_blocks_when_embedded_table_is_unverified() {
         let json = include_str!("../../../tests/golden_vectors/single_w2_60k.json");
         let result = compute_tax_inner(json);
 
-        assert!(result.success);
-        assert!(result.error.is_none());
-        assert_eq!(
-            result.summary.as_ref().map(|summary| summary.tax_year),
-            Some(2025)
-        );
-        assert!(result.form.is_some());
-        assert!(result.meta.is_some());
+        assert!(!result.success);
         assert!(result
-            .trace
+            .error
             .as_deref()
-            .is_some_and(|trace| trace.contains("Result")));
+            .is_some_and(|error| error.contains("does not have recorded verification metadata")));
+        assert!(result.summary.is_none());
+        assert!(result.form.is_none());
+        assert!(result.meta.is_none());
+        assert!(result.trace.is_none());
+    }
+
+    #[test]
+    fn embedded_rule_pack_still_loads_for_review_flows() {
+        let rules = embedded_rule_pack().expect("embedded rule pack should load");
+        assert!(!rules.meta.table_verified);
+    }
+
+    #[test]
+    fn review_tax_input_reports_attention_for_supported_case_until_table_is_verified() {
+        let json = include_str!("../../../tests/golden_vectors/single_w2_60k.json");
+
+        let review = review_tax_input_inner(json);
+        assert!(!review.ready_for_estimate);
+        assert_eq!(review.status, "attention");
+        assert!(review
+            .blocking_issues
+            .iter()
+            .any(|issue| issue.contains("marked unverified")));
     }
 
     #[test]
@@ -472,16 +517,6 @@ mod tests {
             .error
             .as_deref()
             .is_some_and(|error| error.contains("primary filer first name is required")));
-    }
-
-    #[test]
-    fn review_tax_input_reports_ready_for_supported_case() {
-        let json = include_str!("../../../tests/golden_vectors/single_w2_60k.json");
-
-        let review = review_tax_input_inner(json);
-        assert!(review.ready_for_estimate);
-        assert_eq!(review.status, "ready");
-        assert!(review.blocking_issues.is_empty());
     }
 
     #[test]
@@ -539,7 +574,7 @@ mod tests {
     }
 
     #[test]
-    fn review_tax_input_surfaces_hoh_and_dependent_cautions() {
+    fn review_tax_input_surfaces_hoh_and_dependent_cautions_even_when_estimates_are_locked() {
         let json = r#"
         {
           "input": {
@@ -579,8 +614,12 @@ mod tests {
         "#;
 
         let review = review_tax_input_inner(json);
-        assert!(review.ready_for_estimate);
-        assert_eq!(review.status, "ready");
+        assert!(!review.ready_for_estimate);
+        assert_eq!(review.status, "attention");
+        assert!(review
+            .blocking_issues
+            .iter()
+            .any(|issue| issue.contains("marked unverified")));
         assert!(review
             .cautions
             .iter()
@@ -592,7 +631,7 @@ mod tests {
     }
 
     #[test]
-    fn compute_tax_allows_blank_optional_1099_payer_names() {
+    fn compute_tax_still_accepts_blank_optional_1099_payer_names_before_locking() {
         let json = r#"
         {
           "input": {
@@ -607,6 +646,18 @@ mod tests {
               "is_dependent": false
             },
             "spouse": null,
+            "w2_income": [{
+              "recipient": "primary",
+              "employer_name": "Northwind Co",
+              "employer_ein": "12-3456789",
+              "wages": 150000,
+              "federal_tax_withheld": 26000,
+              "state_tax_withheld": 0,
+              "social_security_wages": 150000,
+              "social_security_tax_withheld": 9300,
+              "medicare_wages": 150000,
+              "medicare_tax_withheld": 2175
+            }],
             "interest_income": [{
               "recipient": "primary",
               "payer_name": "   ",
@@ -624,7 +675,10 @@ mod tests {
         "#;
 
         let result = compute_tax_inner(json);
-        assert!(result.success);
-        assert!(result.error.is_none());
+        assert!(!result.success);
+        assert!(result
+            .error
+            .as_deref()
+            .is_some_and(|error| error.contains("does not have recorded verification metadata")));
     }
 }

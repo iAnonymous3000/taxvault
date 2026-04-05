@@ -15,6 +15,7 @@ let supportReviewTimer = 0;
 const state = {
   safetyAcknowledged: false,
   wasmReady: false,
+  supportReviewReadyForEstimate: false,
   currentStep: 1,
   w2Count: 0,
   socialSecurityCount: 0,
@@ -76,6 +77,7 @@ async function start() {
     await init();
     state.wasmReady = true;
     els.loading.classList.add("hidden");
+    syncComputeButtonState();
     showDisclaimerGate();
   } catch (error) {
     renderLoadingError(
@@ -109,6 +111,7 @@ function bindStaticEvents() {
   bindSsnFields(document);
   updateDependentSubtitle(false);
   resetSupportReview();
+  syncComputeButtonState();
 }
 
 function bindSsnFields(root) {
@@ -827,19 +830,26 @@ function resetSupportReview() {
   renderSupportReviewPending(SUPPORT_REVIEW_DEFAULT_SUMMARY);
 }
 
+function syncComputeButtonState() {
+  els.computeBtn.disabled = !(state.wasmReady && state.supportReviewReadyForEstimate);
+}
+
 function renderSupportReviewPending(summary) {
+  state.supportReviewReadyForEstimate = false;
   els.supportReviewCard.dataset.status = "pending";
   els.supportReviewSummary.textContent = summary;
   els.supportReviewBadge.className = "support-review-badge pending";
   els.supportReviewBadge.textContent = "In Progress";
   setSupportReviewItems(els.supportReviewIssuesSection, els.supportReviewIssues, []);
   setSupportReviewItems(els.supportReviewCautionsSection, els.supportReviewCautions, []);
+  syncComputeButtonState();
 }
 
 function renderSupportReview(review) {
   const status = ["ready", "attention", "unsupported"].includes(review?.status)
     ? review.status
     : "attention";
+  state.supportReviewReadyForEstimate = Boolean(review?.ready_for_estimate) && status === "ready";
 
   els.supportReviewCard.dataset.status = status;
   els.supportReviewSummary.textContent =
@@ -856,6 +866,7 @@ function renderSupportReview(review) {
     els.supportReviewCautions,
     dedupeMessages(review?.cautions || [])
   );
+  syncComputeButtonState();
 }
 
 function supportReviewBadgeLabel(status) {
@@ -909,6 +920,11 @@ function computeReturn() {
     return;
   }
 
+  if (!state.supportReviewReadyForEstimate) {
+    showError("Support Review must show Ready before TaxVault can calculate this draft.");
+    return;
+  }
+
   hideError();
   const originalLabel = els.computeBtn.textContent;
   els.computeBtn.disabled = true;
@@ -928,7 +944,7 @@ function computeReturn() {
   } catch (error) {
     showError(`Computation error: ${safeMessage(error)}`);
   } finally {
-    els.computeBtn.disabled = false;
+    syncComputeButtonState();
     els.computeBtn.textContent = originalLabel;
   }
 }
@@ -1501,8 +1517,8 @@ function renderMeta(meta) {
     {
       label: "Tax Table Status",
       value: meta.tax_table_verified
-        ? "Verified embedded 2025 federal tax table"
-        : "Unverified table detected. TaxVault should refuse to calculate.",
+        ? "Recorded review present for the embedded 2025 federal tax table"
+        : "Recorded review missing. TaxVault should stay locked for estimate calculations.",
     },
     { label: "Rule Pack", value: `Federal rules version ${meta.rule_pack_version}` },
     { label: "Privacy", value: meta.privacy },
