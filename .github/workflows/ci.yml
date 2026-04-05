@@ -39,6 +39,9 @@ jobs:
       - name: Run verification script unit tests
         run: python3 -m unittest discover -s tests -p 'test_*.py'
 
+      - name: Check web app JavaScript syntax
+        run: node --check web/app.js
+
       - name: Verify embedded tax table rows
         run: python3 scripts/verify_tax_table.py --check
 

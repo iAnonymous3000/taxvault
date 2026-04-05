@@ -82,8 +82,11 @@ cargo fmt --all --check
 cargo clippy --workspace --all-targets --all-features -- -D warnings
 cargo test --workspace
 python3 -m unittest discover -s tests -p 'test_*.py'
+node --check web/app.js
 python3 scripts/verify_tax_table.py --report --check
 ```
+
+`node --check web/app.js` requires Node.js on your PATH. CI runs this step on every push; the Python suite includes the same check and skips it when `node` is not installed locally.
 
 ## Rebuild The Web Bundle
 

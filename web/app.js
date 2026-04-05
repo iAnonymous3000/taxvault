@@ -51,6 +51,12 @@ const FILING_STATUS_LABELS = {
   married_filing_jointly: "Married Filing Jointly",
   head_of_household: "Head of Household",
 };
+const FILING_STATUS_KEYS = new Set(Object.keys(FILING_STATUS_LABELS));
+const ALLOWED_INCOME_RECIPIENTS = new Set(["primary", "spouse"]);
+const ALLOWED_DEPENDENT_RELATIONSHIPS = new Set(
+  DEPENDENT_RELATIONSHIP_OPTIONS.map((opt) => opt.value).filter(Boolean)
+);
+const ISO_DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 const DRAFT_1040_SECTIONS = [
   {
     title: "Income",
@@ -734,6 +740,244 @@ function persistDraftSnapshot() {
   storeDraftSnapshot(captureDraftSnapshot());
 }
 
+function normalizeFilingStatus(status) {
+  return FILING_STATUS_KEYS.has(status) ? status : "single";
+}
+
+function truncateDraftField(value, maxLen) {
+  if (typeof value !== "string") {
+    return "";
+  }
+
+  return value.length > maxLen ? value.slice(0, maxLen) : value;
+}
+
+function normalizeIncomeRecipient(value) {
+  return ALLOWED_INCOME_RECIPIENTS.has(value) ? value : "primary";
+}
+
+function normalizeDependentRelationship(value) {
+  return ALLOWED_DEPENDENT_RELATIONSHIPS.has(value) ? value : "";
+}
+
+function normalizeDraftStep(value) {
+  const n = Number(value);
+  if (!Number.isFinite(n)) {
+    return 1;
+  }
+
+  return Math.min(3, Math.max(1, Math.floor(n)));
+}
+
+function sanitizeDraftSnapshotForRestore(snapshot) {
+  if (!snapshot || typeof snapshot !== "object" || Array.isArray(snapshot)) {
+    return null;
+  }
+
+  if (snapshot.version !== DRAFT_STORAGE_VERSION) {
+    return null;
+  }
+
+  const filingStatus = normalizeFilingStatus(snapshot.filingStatus);
+  const currentStep = normalizeDraftStep(snapshot.currentStep);
+  const hadResults = Boolean(snapshot.hadResults);
+  const savedAt = typeof snapshot.savedAt === "string" ? snapshot.savedAt : new Date().toISOString();
+
+  const rawPrimary = snapshot.primaryFiler;
+  const rawSpouse = snapshot.spouse;
+  const primaryFiler =
+    rawPrimary && typeof rawPrimary === "object" && !Array.isArray(rawPrimary)
+      ? {
+          firstName: truncateDraftField(rawPrimary.firstName, MAX_TEXT_FIELD_LENGTH),
+          lastName: truncateDraftField(rawPrimary.lastName, MAX_TEXT_FIELD_LENGTH),
+          ssn: "",
+          dob:
+            typeof rawPrimary.dob === "string" && ISO_DATE_RE.test(rawPrimary.dob)
+              ? rawPrimary.dob
+              : "",
+          isBlind: Boolean(rawPrimary.isBlind),
+        }
+      : {
+          firstName: "",
+          lastName: "",
+          ssn: "",
+          dob: "",
+          isBlind: false,
+        };
+
+  const spouse =
+    rawSpouse && typeof rawSpouse === "object" && !Array.isArray(rawSpouse)
+      ? {
+          firstName: truncateDraftField(rawSpouse.firstName, MAX_TEXT_FIELD_LENGTH),
+          lastName: truncateDraftField(rawSpouse.lastName, MAX_TEXT_FIELD_LENGTH),
+          ssn: "",
+          dob:
+            typeof rawSpouse.dob === "string" && ISO_DATE_RE.test(rawSpouse.dob) ? rawSpouse.dob : "",
+          isBlind: Boolean(rawSpouse.isBlind),
+        }
+      : {
+          firstName: "",
+          lastName: "",
+          ssn: "",
+          dob: "",
+          isBlind: false,
+        };
+
+  const rawAdj = snapshot.adjustments;
+  const adjustments =
+    rawAdj && typeof rawAdj === "object" && !Array.isArray(rawAdj)
+      ? {
+          traditionalIraDeduction: truncateDraftField(rawAdj.traditionalIraDeduction, 32),
+          hsaDeduction: truncateDraftField(rawAdj.hsaDeduction, 32),
+          studentLoanInterestPaid: truncateDraftField(rawAdj.studentLoanInterestPaid, 32),
+        }
+      : {
+          traditionalIraDeduction: "",
+          hsaDeduction: "",
+          studentLoanInterestPaid: "",
+        };
+
+  const dependents = Array.isArray(snapshot.dependents)
+    ? snapshot.dependents.slice(0, MAX_DEPENDENTS).map((dep) => {
+        if (!dep || typeof dep !== "object" || Array.isArray(dep)) {
+          return {
+            firstName: "",
+            lastName: "",
+            ssn: "",
+            dob: "",
+            relationship: "",
+            monthsLivedInHome: "",
+          };
+        }
+
+        const monthsRaw =
+          dep.monthsLivedInHome === "" || dep.monthsLivedInHome === null || dep.monthsLivedInHome === undefined
+            ? ""
+            : String(dep.monthsLivedInHome);
+        const monthsNum = monthsRaw === "" ? Number.NaN : Number(monthsRaw);
+        const monthsOk =
+          Number.isInteger(monthsNum) && monthsNum >= 0 && monthsNum <= 12 ? String(monthsNum) : "";
+
+        return {
+          firstName: truncateDraftField(dep.firstName, MAX_TEXT_FIELD_LENGTH),
+          lastName: truncateDraftField(dep.lastName, MAX_TEXT_FIELD_LENGTH),
+          ssn: "",
+          dob: typeof dep.dob === "string" && ISO_DATE_RE.test(dep.dob) ? dep.dob : "",
+          relationship: normalizeDependentRelationship(dep.relationship),
+          monthsLivedInHome: monthsOk,
+        };
+      })
+    : [];
+
+  const w2s = Array.isArray(snapshot.w2s)
+    ? snapshot.w2s.slice(0, MAX_W2_FORMS).map((w2) => {
+        if (!w2 || typeof w2 !== "object" || Array.isArray(w2)) {
+          return {
+            employerName: "",
+            recipient: "primary",
+            employerEin: "",
+            federalTaxWithheld: "",
+            wages: "",
+            stateTaxWithheld: "",
+            socialSecurityWages: "",
+            socialSecurityTaxWithheld: "",
+            medicareWages: "",
+            medicareTaxWithheld: "",
+            advancedOpen: false,
+          };
+        }
+
+        return {
+          employerName: truncateDraftField(w2.employerName, MAX_TEXT_FIELD_LENGTH),
+          recipient: normalizeIncomeRecipient(w2.recipient),
+          employerEin: truncateDraftField(w2.employerEin, 12),
+          federalTaxWithheld: truncateDraftField(w2.federalTaxWithheld, 32),
+          wages: truncateDraftField(w2.wages, 32),
+          stateTaxWithheld: truncateDraftField(w2.stateTaxWithheld, 32),
+          socialSecurityWages: truncateDraftField(w2.socialSecurityWages, 32),
+          socialSecurityTaxWithheld: truncateDraftField(w2.socialSecurityTaxWithheld, 32),
+          medicareWages: truncateDraftField(w2.medicareWages, 32),
+          medicareTaxWithheld: truncateDraftField(w2.medicareTaxWithheld, 32),
+          advancedOpen: Boolean(w2.advancedOpen),
+        };
+      })
+    : [];
+
+  const socialSecurityIncome = Array.isArray(snapshot.socialSecurityIncome)
+    ? snapshot.socialSecurityIncome.slice(0, MAX_SOCIAL_SECURITY_FORMS).map((item) => {
+        if (!item || typeof item !== "object" || Array.isArray(item)) {
+          return {
+            recipient: "primary",
+            totalBenefits: "",
+            voluntaryWithholding: "",
+          };
+        }
+
+        return {
+          recipient: normalizeIncomeRecipient(item.recipient),
+          totalBenefits: truncateDraftField(item.totalBenefits, 32),
+          voluntaryWithholding: truncateDraftField(item.voluntaryWithholding, 32),
+        };
+      })
+    : [];
+
+  const interestIncome = Array.isArray(snapshot.interestIncome)
+    ? snapshot.interestIncome.slice(0, MAX_INTEREST_FORMS).map((item) => {
+        if (!item || typeof item !== "object" || Array.isArray(item)) {
+          return {
+            payerName: "",
+            recipient: "primary",
+            taxableInterest: "",
+            taxExemptInterest: "",
+          };
+        }
+
+        return {
+          payerName: truncateDraftField(item.payerName, MAX_TEXT_FIELD_LENGTH),
+          recipient: normalizeIncomeRecipient(item.recipient),
+          taxableInterest: truncateDraftField(item.taxableInterest, 32),
+          taxExemptInterest: truncateDraftField(item.taxExemptInterest, 32),
+        };
+      })
+    : [];
+
+  const dividendIncome = Array.isArray(snapshot.dividendIncome)
+    ? snapshot.dividendIncome.slice(0, MAX_DIVIDEND_FORMS).map((item) => {
+        if (!item || typeof item !== "object" || Array.isArray(item)) {
+          return {
+            payerName: "",
+            recipient: "primary",
+            ordinaryDividends: "",
+            qualifiedDividends: "",
+          };
+        }
+
+        return {
+          payerName: truncateDraftField(item.payerName, MAX_TEXT_FIELD_LENGTH),
+          recipient: normalizeIncomeRecipient(item.recipient),
+          ordinaryDividends: truncateDraftField(item.ordinaryDividends, 32),
+          qualifiedDividends: truncateDraftField(item.qualifiedDividends, 32),
+        };
+      })
+    : [];
+
+  return {
+    version: DRAFT_STORAGE_VERSION,
+    savedAt,
+    filingStatus,
+    currentStep,
+    hadResults,
+    primaryFiler,
+    spouse,
+    adjustments,
+    dependents,
+    w2s,
+    socialSecurityIncome,
+    interestIncome,
+    dividendIncome,
+  };
+}
+
 function restoreDraftSnapshot() {
   const localStorageRef = storageFor("local");
   const sessionStorageRef = storageFor("session");
@@ -755,21 +999,22 @@ function restoreDraftSnapshot() {
     return false;
   }
 
-  if (snapshot?.version !== DRAFT_STORAGE_VERSION) {
+  const sanitizedSnapshot = sanitizeDraftSnapshotForRestore(snapshot);
+  if (!sanitizedSnapshot) {
     removeStoredValue(sessionStorageRef, SESSION_DRAFT_STORAGE_KEY);
     removeStoredValue(localStorageRef, LOCAL_DRAFT_STORAGE_KEY);
     refreshStorageStatus();
     return false;
   }
 
-  const sanitizedSnapshot = storeDraftSnapshot(snapshot, { refreshStatus: false });
-  if (!sanitizedSnapshot) {
+  const storedSnapshot = storeDraftSnapshot(sanitizedSnapshot, { refreshStatus: false });
+  if (!storedSnapshot) {
     refreshStorageStatus();
     return false;
   }
 
-  applyDraftSnapshot(sanitizedSnapshot);
-  const restoredMessage = sanitizedSnapshot.hadResults
+  applyDraftSnapshot(storedSnapshot);
+  const restoredMessage = storedSnapshot.hadResults
     ? "Draft restored. SSNs and EINs must be re-entered (not stored for your protection). Recalculate to refresh the estimate results."
     : "Draft restored. SSNs and EINs must be re-entered (not stored for your protection).";
   refreshStorageStatus(restoredMessage);
@@ -785,11 +1030,13 @@ function applyDraftSnapshot(snapshot) {
     applyFilerInputs("p", snapshot.primaryFiler);
     applyFilerInputs("s", snapshot.spouse);
     applyAdjustmentInputs(snapshot.adjustments);
-    restoreDependents(snapshot.dependents || []);
-    restoreW2Cards(snapshot.w2s || []);
-    restoreSocialSecurityCards(snapshot.socialSecurityIncome || []);
-    restoreInterestCards(snapshot.interestIncome || []);
-    restoreDividendCards(snapshot.dividendIncome || []);
+    restoreDependents(Array.isArray(snapshot.dependents) ? snapshot.dependents : []);
+    restoreW2Cards(Array.isArray(snapshot.w2s) ? snapshot.w2s : []);
+    restoreSocialSecurityCards(
+      Array.isArray(snapshot.socialSecurityIncome) ? snapshot.socialSecurityIncome : []
+    );
+    restoreInterestCards(Array.isArray(snapshot.interestIncome) ? snapshot.interestIncome : []);
+    restoreDividendCards(Array.isArray(snapshot.dividendIncome) ? snapshot.dividendIncome : []);
   } finally {
     draftRestoreInProgress = false;
   }
@@ -1018,10 +1265,11 @@ function handleStatusOptionKeydown(event) {
 }
 
 function selectStatus(status, { autoSeedDependent = true, focusSelected = false } = {}) {
-  state.filingStatus = status;
+  const normalized = normalizeFilingStatus(status);
+  state.filingStatus = normalized;
 
   document.querySelectorAll(".status-option").forEach((button) => {
-    const selected = button.dataset.status === status;
+    const selected = button.dataset.status === normalized;
     button.classList.toggle("selected", selected);
     button.setAttribute("aria-checked", String(selected));
     button.tabIndex = selected ? 0 : -1;
@@ -1031,8 +1279,8 @@ function selectStatus(status, { autoSeedDependent = true, focusSelected = false 
     }
   });
 
-  const isMfj = status === "married_filing_jointly";
-  const isHoh = status === "head_of_household";
+  const isMfj = normalized === "married_filing_jointly";
+  const isHoh = normalized === "head_of_household";
   els.spouseCard.classList.toggle("hidden", !isMfj);
   updateDependentSubtitle(isHoh);
 
@@ -2024,6 +2272,10 @@ function refreshSupportReview() {
 
   try {
     const review = JSON.parse(review_tax_input(JSON.stringify(payload)));
+    if (!review || typeof review !== "object" || Array.isArray(review)) {
+      throw new Error("Support review returned an unexpected payload shape.");
+    }
+
     renderSupportReview(review);
   } catch (error) {
     renderSupportReview({
@@ -2071,12 +2323,12 @@ function renderSupportReview(review) {
   setSupportReviewItems(
     els.supportReviewIssuesSection,
     els.supportReviewIssues,
-    dedupeMessages(review?.blocking_issues || [])
+    dedupeMessages(coalesceStringList(review?.blocking_issues))
   );
   setSupportReviewItems(
     els.supportReviewCautionsSection,
     els.supportReviewCautions,
-    dedupeMessages(review?.cautions || [])
+    dedupeMessages(coalesceStringList(review?.cautions))
   );
   syncComputeButtonState();
 }
@@ -2106,6 +2358,14 @@ function setSupportReviewItems(section, list, items) {
 
 function dedupeMessages(messages) {
   return Array.from(new Set(messages.map((message) => String(message))));
+}
+
+function coalesceStringList(value) {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+
+  return value.map((item) => String(item));
 }
 
 function computeReturn() {
@@ -2150,6 +2410,11 @@ function computeReturn() {
 
     if (!data.success) {
       showError(data.error || "Unable to compute this return.");
+      return;
+    }
+
+    if (!data.summary || typeof data.summary !== "object" || Array.isArray(data.summary)) {
+      showError("Unexpected response from the tax engine. Try calculating again.");
       return;
     }
 
