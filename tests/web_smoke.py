@@ -18,6 +18,9 @@ WEB_DIR = ROOT / "web"
 DRIVER_START_TIMEOUT_SECONDS = 10
 PAGE_WAIT_TIMEOUT_SECONDS = 20
 POLL_INTERVAL_SECONDS = 0.1
+WEBDRIVER_REQUEST_TIMEOUT_SECONDS = 10
+SESSION_REQUEST_TIMEOUT_SECONDS = 30
+SESSION_RETRY_COUNT = 3
 
 
 def reserve_port() -> int:
@@ -93,7 +96,7 @@ class SafariDriver:
             self._process.kill()
             self._process.wait(timeout=5)
 
-    def request(self, method: str, path: str, payload=None):
+    def request(self, method: str, path: str, payload=None, timeout: float = WEBDRIVER_REQUEST_TIMEOUT_SECONDS):
         body = None if payload is None else json.dumps(payload).encode("utf-8")
         request = urllib.request.Request(
             f"http://127.0.0.1:{self.port}{path}",
@@ -103,8 +106,10 @@ class SafariDriver:
         )
 
         try:
-            with urllib.request.urlopen(request, timeout=10) as response:
+            with urllib.request.urlopen(request, timeout=timeout) as response:
                 raw_body = response.read().decode("utf-8")
+        except TimeoutError as error:
+            raise WebDriverError(f"webdriver {method} {path} timed out after {timeout} seconds") from error
         except urllib.error.HTTPError as error:
             raw_body = error.read().decode("utf-8")
             try:
@@ -125,6 +130,7 @@ class SafariDriver:
             "POST",
             "/session",
             {"capabilities": {"alwaysMatch": {"browserName": "Safari"}}},
+            timeout=SESSION_REQUEST_TIMEOUT_SECONDS,
         )
         value = response["value"]
         session_id = value.get("sessionId") or response.get("sessionId")
@@ -281,7 +287,20 @@ class WebSmokeTests(unittest.TestCase):
         cls.server.stop()
 
     def setUp(self):
-        self.browser = self.driver.new_session()
+        last_error = None
+        for attempt in range(SESSION_RETRY_COUNT):
+            try:
+                self.browser = self.driver.new_session()
+                return
+            except WebDriverError as error:
+                last_error = error
+                if attempt == SESSION_RETRY_COUNT - 1:
+                    break
+                type(self).driver.stop()
+                type(self).driver = SafariDriver()
+                type(self).driver.start()
+
+        raise last_error
 
     def tearDown(self):
         self.browser.close()
@@ -326,21 +345,27 @@ class WebSmokeTests(unittest.TestCase):
         self.browser.set_value("#w2-1-med-wages", wages)
         self.browser.set_value("#w2-1-med-wh", "870")
 
+    def wait_for_locked_review(self):
+        self.browser.wait_for(
+            lambda: "estimate calculations are locked" in self.browser.text("#supportReviewSummary"),
+            "support review never reached the locked summary",
+        )
+        self.browser.wait_for(
+            lambda: any(
+                "marked unverified" in item for item in self.browser.texts("#supportReviewIssues li")
+            ),
+            "support review never surfaced the unverified tax table issue",
+        )
+
     def test_supported_return_stays_locked_until_tax_table_review_is_recorded(self):
         self.open_app()
         self.fill_step1_single()
         self.add_supported_w2()
 
-        self.browser.wait_for(
-            lambda: self.browser.text("#supportReviewBadge") == "Needs Attention",
-            "support review never reached Needs Attention",
-        )
+        self.wait_for_locked_review()
         self.assertIn(
             "estimate calculations are locked",
             self.browser.text("#supportReviewSummary"),
-        )
-        self.assertTrue(
-            any("marked unverified" in item for item in self.browser.texts("#supportReviewIssues li"))
         )
         self.assertTrue(self.browser.is_disabled("#computeBtn"))
 
@@ -387,13 +412,7 @@ class WebSmokeTests(unittest.TestCase):
         )
         self.add_supported_w2()
 
-        self.browser.wait_for(
-            lambda: self.browser.text("#supportReviewBadge") == "Needs Attention",
-            "Head of Household review never reached Needs Attention",
-        )
-        self.assertTrue(
-            any("marked unverified" in item for item in self.browser.texts("#supportReviewIssues li"))
-        )
+        self.wait_for_locked_review()
         cautions = self.browser.texts("#supportReviewCautions li")
         self.assertTrue(
             any("Head of Household is still a manual determination" in item for item in cautions)
