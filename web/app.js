@@ -2,6 +2,10 @@ import init, { compute_tax, review_tax_input } from "./pkg/taxvault_wasm.js";
 
 const SSN_PATTERN = /^\d{3}-\d{2}-\d{4}$/;
 const EIN_PATTERN = /^\d{2}-\d{7}$/;
+const FOCUSABLE_SELECTOR =
+  'a[href], button:not([disabled]), input:not([disabled]):not([type="hidden"]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])';
+const DATE_INPUT_MIN = "1900-01-01";
+const DATE_INPUT_MAX = todayIsoDate();
 const currencyFormatter = new Intl.NumberFormat("en-US", {
   style: "currency",
   currency: "USD",
@@ -13,7 +17,7 @@ const draftTimestampFormatter = new Intl.DateTimeFormat("en-US", {
   timeStyle: "short",
 });
 const SUPPORT_REVIEW_DEFAULT_SUMMARY =
-  "Add at least one supported income form to see whether this draft fits TaxVault's current estimate slice.";
+  "Start with the forms you actually have. TaxVault will tell you whether this draft fits the supported estimate scope.";
 const SUPPORTED_TAX_YEAR = 2025;
 const DRAFT_STORAGE_VERSION = 1;
 const SESSION_DRAFT_STORAGE_KEY = `taxvault:draft:session:${SUPPORTED_TAX_YEAR}`;
@@ -96,6 +100,7 @@ const DRAFT_1040_SECTIONS = [
 let supportReviewTimer = 0;
 let draftSaveTimer = 0;
 let draftRestoreInProgress = false;
+let lastGateFocusedElement = null;
 
 const state = {
   safetyAcknowledged: false,
@@ -114,7 +119,9 @@ const els = {
   disclaimerGate: document.getElementById("disclaimerGate"),
   gateAcknowledge: document.getElementById("gateAcknowledge"),
   gateContinueBtn: document.getElementById("gateContinueBtn"),
+  filingStatusOptions: document.getElementById("filingStatusOptions"),
   loading: document.getElementById("loading"),
+  mainContent: document.getElementById("mainContent"),
   app: document.getElementById("app"),
   error: document.getElementById("error"),
   spouseCard: document.getElementById("spouseCard"),
@@ -125,7 +132,9 @@ const els = {
   clearAllBtn: document.getElementById("clearAllBtn"),
   rememberDraftToggle: document.getElementById("rememberDraftToggle"),
   storageStatus: document.getElementById("storageStatus"),
+  storageTrustCopy: document.getElementById("storageTrustCopy"),
   uiStatus: document.getElementById("uiStatus"),
+  incomeSummaryChips: document.getElementById("incomeSummaryChips"),
   w2Container: document.getElementById("w2Container"),
   addW2Btn: document.getElementById("addW2Btn"),
   socialSecurityContainer: document.getElementById("socialSecurityContainer"),
@@ -138,6 +147,7 @@ const els = {
   hsaDeduction: document.getElementById("hsaDeduction"),
   studentLoanInterestPaid: document.getElementById("studentLoanInterestPaid"),
   computeBtn: document.getElementById("computeBtn"),
+  computeHelp: document.getElementById("computeHelp"),
   supportReviewCard: document.getElementById("supportReviewCard"),
   supportReviewBadge: document.getElementById("supportReviewBadge"),
   supportReviewSummary: document.getElementById("supportReviewSummary"),
@@ -183,6 +193,7 @@ function bindStaticEvents() {
   document.querySelectorAll(".status-option").forEach((button) => {
     button.addEventListener("click", () => selectStatus(button.dataset.status));
   });
+  els.filingStatusOptions?.addEventListener("keydown", handleStatusOptionKeydown);
 
   document.getElementById("step1ContinueBtn").addEventListener("click", () => goToStep(2));
   document.getElementById("step2BackBtn").addEventListener("click", () => goToStep(1));
@@ -202,13 +213,16 @@ function bindStaticEvents() {
   els.traceToggle.addEventListener("click", toggleTrace);
   els.app.addEventListener("input", handleAppFieldMutation);
   els.app.addEventListener("change", handleAppFieldMutation);
+  document.addEventListener("keydown", handleDocumentKeydown);
 
   bindSsnFields(document);
   bindMoneyFields(document);
+  applyDateConstraints(document);
   updateDependentSubtitle(false);
   resetSupportReview();
   resetDraftPreview();
   refreshStorageStatus();
+  renderIncomeSummaryChips();
   syncComputeButtonState();
 }
 
@@ -248,6 +262,61 @@ function nextFocusTargetAfterRemoval(card, fallback) {
     card.previousElementSibling?.querySelector("input, select, button") ||
     fallback
   );
+}
+
+function getFocusableElements(root) {
+  if (!(root instanceof HTMLElement)) {
+    return [];
+  }
+
+  return Array.from(root.querySelectorAll(FOCUSABLE_SELECTOR)).filter(
+    (element) =>
+      element instanceof HTMLElement &&
+      !element.hasAttribute("disabled") &&
+      !element.closest(".hidden") &&
+      element.offsetParent !== null
+  );
+}
+
+function handleDocumentKeydown(event) {
+  if (els.disclaimerGate.classList.contains("hidden")) {
+    return;
+  }
+
+  if (event.key === "Tab") {
+    trapGateFocus(event);
+    return;
+  }
+
+  if (event.key === "Escape") {
+    event.preventDefault();
+    announceUiStatus("Review and acknowledge the estimate warning before continuing.");
+    focusElement(els.gateAcknowledge);
+  }
+}
+
+function trapGateFocus(event) {
+  const focusable = getFocusableElements(els.disclaimerGate);
+  if (focusable.length === 0) {
+    return;
+  }
+
+  const first = focusable[0];
+  const last = focusable[focusable.length - 1];
+  const active = document.activeElement;
+
+  if (event.shiftKey) {
+    if (active === first || !els.disclaimerGate.contains(active)) {
+      event.preventDefault();
+      last.focus();
+    }
+    return;
+  }
+
+  if (active === last || !els.disclaimerGate.contains(active)) {
+    event.preventDefault();
+    first.focus();
+  }
 }
 
 function bindMoneyFields(root) {
@@ -353,6 +422,7 @@ function restoreDraftPreference() {
 
   els.rememberDraftToggle.checked =
     readStoredValue(localStorageRef, LOCAL_DRAFT_PREFERENCE_KEY) === "true";
+  refreshStorageStatus();
 }
 
 function handleRememberDraftToggle() {
@@ -380,12 +450,134 @@ function refreshStorageStatus(message = "") {
 
   if (message) {
     els.storageStatus.textContent = message;
+    updateStorageTrustCopy();
     return;
   }
 
   els.storageStatus.textContent = rememberDraftEnabled()
     ? "Draft autosaves in this tab and stays on this device until you clear it."
     : "Draft autosaves in this tab and clears when the tab closes.";
+  updateStorageTrustCopy();
+}
+
+function updateStorageTrustCopy() {
+  if (!els.storageTrustCopy) {
+    return;
+  }
+
+  const localStorageRef = storageFor("local");
+  if (!localStorageRef) {
+    els.storageTrustCopy.textContent =
+      "This browser mode only allows tab-only autosave, so nothing stays on the device after the tab closes.";
+    return;
+  }
+
+  els.storageTrustCopy.textContent = rememberDraftEnabled()
+    ? "Your draft autosaves in this tab and stays on this device until you clear it."
+    : "By default your draft autosaves only in this tab and clears when the tab closes.";
+}
+
+function renderIncomeSummaryChips() {
+  if (!els.incomeSummaryChips) {
+    return;
+  }
+
+  const counts = [
+    { label: "W-2", count: els.w2Container.children.length },
+    { label: "SSA-1099", count: els.socialSecurityContainer.children.length },
+    { label: "1099-INT", count: els.interestContainer.children.length },
+    { label: "1099-DIV", count: els.dividendContainer.children.length },
+  ];
+  const totalForms = counts.reduce((sum, item) => sum + item.count, 0);
+
+  els.incomeSummaryChips.replaceChildren(
+    createElement("span", {
+      className: "summary-chip lead",
+      text:
+        totalForms === 0
+          ? "Most people can start with W-2 and ignore the rest."
+          : `${totalForms} income card${totalForms === 1 ? "" : "s"} started.`,
+    })
+  );
+
+  counts.forEach(({ label, count }) => {
+    els.incomeSummaryChips.append(
+      createElement("span", {
+        className: `summary-chip${count > 0 ? " active" : ""}`,
+        text: `${label}: ${count}`,
+      })
+    );
+  });
+
+  els.incomeSummaryChips.append(
+    createElement("span", {
+      className: "summary-chip subtle",
+      text: "Adjustments are optional.",
+    })
+  );
+}
+
+function countEnteredFormCards() {
+  return (
+    els.w2Container.children.length +
+    els.socialSecurityContainer.children.length +
+    els.interestContainer.children.length +
+    els.dividendContainer.children.length
+  );
+}
+
+function setComputeHelp(message, tone = "pending") {
+  if (!els.computeHelp) {
+    return;
+  }
+
+  els.computeHelp.textContent = message;
+  els.computeHelp.className = `compute-help ${tone}`;
+  els.computeBtn?.setAttribute("title", message);
+}
+
+function updateComputeHelpText() {
+  if (!els.computeHelp) {
+    return;
+  }
+
+  if (!state.wasmReady) {
+    setComputeHelp("Loading the tax engine so TaxVault can review and calculate your draft.", "pending");
+    return;
+  }
+
+  if (state.supportReviewReadyForEstimate) {
+    setComputeHelp("Ready to calculate. Give the support review one more look before you continue.", "ready");
+    return;
+  }
+
+  if (countEnteredFormCards() === 0) {
+    setComputeHelp("Add at least one W-2, SSA-1099, 1099-INT, or 1099-DIV to unlock calculation.", "pending");
+    return;
+  }
+
+  switch (els.supportReviewCard?.dataset.status) {
+    case "unsupported":
+      setComputeHelp("TaxVault cannot calculate this draft until the blocking issues above are resolved.", "attention");
+      break;
+    case "attention":
+      setComputeHelp("Finish the blocking issues above before calculating this estimate.", "attention");
+      break;
+    default:
+      setComputeHelp("TaxVault is checking whether this draft fits the supported estimate scope.", "pending");
+      break;
+  }
+}
+
+function applyDateConstraints(root) {
+  if (!(root instanceof HTMLElement || root instanceof Document)) {
+    return;
+  }
+
+  root.querySelectorAll('input[type="date"][data-date-kind="dob"]').forEach((input) => {
+    input.setAttribute("min", DATE_INPUT_MIN);
+    input.setAttribute("max", DATE_INPUT_MAX);
+  });
 }
 
 function scheduleDraftSave() {
@@ -612,6 +804,8 @@ function restoreW2Cards(w2s) {
     }
     bindMoneyFields(card);
   });
+
+  renderIncomeSummaryChips();
 }
 
 function restoreSocialSecurityCards(items) {
@@ -626,6 +820,8 @@ function restoreSocialSecurityCards(items) {
     card.querySelector(".ssa-withholding").value = item.voluntaryWithholding || "";
     bindMoneyFields(card);
   });
+
+  renderIncomeSummaryChips();
 }
 
 function restoreInterestCards(items) {
@@ -641,6 +837,8 @@ function restoreInterestCards(items) {
     card.querySelector(".interest-tax-exempt").value = item.taxExemptInterest || "";
     bindMoneyFields(card);
   });
+
+  renderIncomeSummaryChips();
 }
 
 function restoreDividendCards(items) {
@@ -656,6 +854,8 @@ function restoreDividendCards(items) {
     card.querySelector(".dividend-qualified").value = item.qualifiedDividends || "";
     bindMoneyFields(card);
   });
+
+  renderIncomeSummaryChips();
 }
 
 function bindSsnFields(root) {
@@ -691,14 +891,27 @@ function setSsnVisibility(input, toggle, visible) {
 }
 
 function showDisclaimerGate() {
+  if (els.disclaimerGate.classList.contains("hidden")) {
+    lastGateFocusedElement =
+      document.activeElement instanceof HTMLElement &&
+      document.activeElement !== document.body &&
+      !els.disclaimerGate.contains(document.activeElement)
+        ? document.activeElement
+        : null;
+  }
+
   els.disclaimerGate.classList.remove("hidden");
   document.body.classList.add("gate-open");
   updateGateButtonState();
+  focusElement(els.gateAcknowledge);
 }
 
 function hideDisclaimerGate() {
   els.disclaimerGate.classList.add("hidden");
   document.body.classList.remove("gate-open");
+  const focusTarget = lastGateFocusedElement || document.getElementById("pFirst");
+  lastGateFocusedElement = null;
+  focusElement(focusTarget);
 }
 
 function updateGateButtonState() {
@@ -715,13 +928,59 @@ function acknowledgeSafetyGate() {
   els.app.classList.remove("hidden");
 }
 
-function selectStatus(status, { autoSeedDependent = true } = {}) {
+function handleStatusOptionKeydown(event) {
+  const target = event.target.closest(".status-option");
+  if (!(target instanceof HTMLElement)) {
+    return;
+  }
+
+  const buttons = Array.from(document.querySelectorAll(".status-option"));
+  const index = buttons.indexOf(target);
+  if (index < 0) {
+    return;
+  }
+
+  let nextIndex = index;
+  switch (event.key) {
+    case "ArrowRight":
+    case "ArrowDown":
+      nextIndex = (index + 1) % buttons.length;
+      break;
+    case "ArrowLeft":
+    case "ArrowUp":
+      nextIndex = (index - 1 + buttons.length) % buttons.length;
+      break;
+    case "Home":
+      nextIndex = 0;
+      break;
+    case "End":
+      nextIndex = buttons.length - 1;
+      break;
+    case " ":
+    case "Enter":
+      event.preventDefault();
+      selectStatus(target.dataset.status, { focusSelected: true });
+      return;
+    default:
+      return;
+  }
+
+  event.preventDefault();
+  selectStatus(buttons[nextIndex].dataset.status, { focusSelected: true });
+}
+
+function selectStatus(status, { autoSeedDependent = true, focusSelected = false } = {}) {
   state.filingStatus = status;
 
   document.querySelectorAll(".status-option").forEach((button) => {
     const selected = button.dataset.status === status;
     button.classList.toggle("selected", selected);
-    button.setAttribute("aria-pressed", String(selected));
+    button.setAttribute("aria-checked", String(selected));
+    button.tabIndex = selected ? 0 : -1;
+
+    if (selected && focusSelected) {
+      focusElement(button);
+    }
   });
 
   const isMfj = status === "married_filing_jointly";
@@ -937,6 +1196,7 @@ function createInputControl({
   min,
   max,
   step,
+  attributes = {},
 } = {}) {
   return createElement("input", {
     className,
@@ -950,6 +1210,7 @@ function createInputControl({
       min,
       max,
       step,
+      ...attributes,
     },
   });
 }
@@ -1177,6 +1438,7 @@ function addW2({ focusNewCard = true } = {}) {
 
   els.w2Container.append(card);
   updateRemoveButtons();
+  renderIncomeSummaryChips();
   scheduleSupportReview();
   scheduleDraftSave();
   announceUiStatus(`Added W-2 #${els.w2Container.children.length}.`);
@@ -1229,6 +1491,7 @@ function addSocialSecurity({ focusNewCard = true } = {}) {
 
   els.socialSecurityContainer.append(card);
   updateSocialSecurityRemoveButtons();
+  renderIncomeSummaryChips();
   scheduleSupportReview();
   scheduleDraftSave();
   announceUiStatus(`Added SSA-1099 #${els.socialSecurityContainer.children.length}.`);
@@ -1292,6 +1555,7 @@ function addInterest({ focusNewCard = true } = {}) {
 
   els.interestContainer.append(card);
   updateInterestRemoveButtons();
+  renderIncomeSummaryChips();
   scheduleSupportReview();
   scheduleDraftSave();
   announceUiStatus(`Added 1099-INT #${els.interestContainer.children.length}.`);
@@ -1355,6 +1619,7 @@ function addDividend({ focusNewCard = true } = {}) {
 
   els.dividendContainer.append(card);
   updateDividendRemoveButtons();
+  renderIncomeSummaryChips();
   scheduleSupportReview();
   scheduleDraftSave();
   announceUiStatus(`Added 1099-DIV #${els.dividendContainer.children.length}.`);
@@ -1407,6 +1672,9 @@ function addDependent({ focusNewCard = true } = {}) {
           id: `${idPrefix}-dob`,
           className: "dep-dob",
           type: "date",
+          min: DATE_INPUT_MIN,
+          max: DATE_INPUT_MAX,
+          attributes: { "data-date-kind": "dob" },
         })
       )
     ),
@@ -1436,6 +1704,7 @@ function addDependent({ focusNewCard = true } = {}) {
 
   card.querySelector(".remove-dependent-btn").addEventListener("click", () => removeDependent(card));
   bindSsnFields(card);
+  applyDateConstraints(card);
 
   els.dependentContainer.append(card);
   updateDependentRemoveButtons();
@@ -1453,6 +1722,7 @@ function removeW2(card) {
   cleanupReferencePreviews(card);
   card.remove();
   updateRemoveButtons();
+  renderIncomeSummaryChips();
   scheduleSupportReview();
   scheduleDraftSave();
   focusElement(focusTarget);
@@ -1464,6 +1734,7 @@ function removeInterest(card) {
   cleanupReferencePreviews(card);
   card.remove();
   updateInterestRemoveButtons();
+  renderIncomeSummaryChips();
   scheduleSupportReview();
   scheduleDraftSave();
   focusElement(focusTarget);
@@ -1475,6 +1746,7 @@ function removeSocialSecurity(card) {
   cleanupReferencePreviews(card);
   card.remove();
   updateSocialSecurityRemoveButtons();
+  renderIncomeSummaryChips();
   scheduleSupportReview();
   scheduleDraftSave();
   focusElement(focusTarget);
@@ -1486,6 +1758,7 @@ function removeDividend(card) {
   cleanupReferencePreviews(card);
   card.remove();
   updateDividendRemoveButtons();
+  renderIncomeSummaryChips();
   scheduleSupportReview();
   scheduleDraftSave();
   focusElement(focusTarget);
@@ -1654,6 +1927,8 @@ function resetSupportReview() {
 
 function syncComputeButtonState() {
   els.computeBtn.disabled = !(state.wasmReady && state.supportReviewReadyForEstimate);
+  els.computeBtn.setAttribute("aria-disabled", String(els.computeBtn.disabled));
+  updateComputeHelpText();
 }
 
 function renderSupportReviewPending(summary) {
@@ -1750,7 +2025,9 @@ function computeReturn() {
   hideError();
   const originalLabel = els.computeBtn.textContent;
   els.computeBtn.disabled = true;
+  els.computeBtn.setAttribute("aria-disabled", "true");
   els.computeBtn.textContent = "Calculating...";
+  setComputeHelp("Calculating locally in your browser...", "pending");
 
   try {
     const resultJson = compute_tax(JSON.stringify(payload));
@@ -2247,7 +2524,7 @@ function renderHero(summary) {
       createElement("div", { className: "amount refund", text: fmtCurrency(summary.overpayment) }),
       createElement("div", {
         className: "result-sub",
-        text: `Estimate only for ${summary.tax_year}. Do not use this refund number to file a return.`,
+        text: `Calculated locally in your browser for ${summary.tax_year}. Do not use this refund number to file a return.`,
       })
     );
     return;
@@ -2259,7 +2536,7 @@ function renderHero(summary) {
       createElement("div", { className: "amount owe", text: fmtCurrency(summary.balance_due) }),
       createElement("div", {
         className: "result-sub",
-        text: `Estimate only for ${summary.tax_year}. Do not use this balance-due number to file a return.`,
+        text: `Calculated locally in your browser for ${summary.tax_year}. Do not use this balance-due number to file a return.`,
       })
     );
     return;
@@ -2270,7 +2547,7 @@ function renderHero(summary) {
     createElement("div", { className: "amount neutral", text: fmtCurrency("0") }),
     createElement("div", {
       className: "result-sub",
-      text: "Estimate only. A zero balance here does not mean your return is filing-ready.",
+      text: "Calculated locally in your browser. A zero balance here does not mean your return is filing-ready.",
     })
   );
 }
@@ -2760,6 +3037,7 @@ function clearAllData() {
   els.interestContainer.replaceChildren();
   els.dividendContainer.replaceChildren();
   els.dependentContainer.replaceChildren();
+  renderIncomeSummaryChips();
   els.resultHero.replaceChildren();
   els.resultMeta.replaceChildren();
   els.scopeList.replaceChildren();
@@ -2799,6 +3077,12 @@ function clearAllData() {
   refreshStorageStatus("Saved draft cleared from this tab and this device.");
   announceUiStatus("All draft data cleared.");
   showDisclaimerGate();
+}
+
+function todayIsoDate() {
+  const today = new Date();
+  const local = new Date(today.getTime() - today.getTimezoneOffset() * 60_000);
+  return local.toISOString().slice(0, 10);
 }
 
 function createElement(tagName, { className = "", text = "", attributes = {} } = {}) {

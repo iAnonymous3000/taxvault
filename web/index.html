@@ -9,9 +9,22 @@
 </head>
 <body>
 
+<a class="skip-link" href="#mainContent">Skip to estimate form</a>
+
 <header class="header">
-  <h1>TaxVault</h1>
-  <p>2025 federal tax estimate only. Not a filing-ready tax return.</p>
+  <div class="header-inner">
+    <div class="header-eyebrow">Private 2025 Federal Estimate</div>
+    <h1>TaxVault</h1>
+    <p>
+      Get a quick federal tax estimate without sending your tax details through a cloud filing
+      workflow.
+    </p>
+    <div class="header-chips" aria-label="TaxVault highlights">
+      <span class="header-chip">Runs in your browser</span>
+      <span class="header-chip">No cloud upload required</span>
+      <span class="header-chip">Estimate only, not filing</span>
+    </div>
+  </div>
 </header>
 
 <section
@@ -23,13 +36,25 @@
   aria-describedby="gateBody"
 >
   <div class="gate-card">
-    <div class="notice-eyebrow">Required Acknowledgment</div>
-    <h2 class="gate-title" id="gateTitle">Do not use these numbers to file a tax return.</h2>
-    <p class="gate-copy" id="gateBody">
-      TaxVault is an estimate tool for a limited set of W-2, SSA-1099, 1099-INT, and 1099-DIV
-      scenarios plus a few above-the-line deductions. It does not prepare a filing-ready return,
-      and missing income, deductions, or credits can make the result wrong.
-    </p>
+    <div class="gate-grid">
+      <div>
+        <div class="notice-eyebrow">Required Acknowledgment</div>
+        <h2 class="gate-title" id="gateTitle">Use TaxVault for a private estimate, not for filing.</h2>
+        <p class="gate-copy" id="gateBody">
+          TaxVault is best for a narrow set of 2025 federal estimates when you already have your
+          W-2 or supported 1099 forms in front of you. It does not prepare a filing-ready return,
+          and unsupported forms can make the result wrong.
+        </p>
+      </div>
+      <aside class="gate-side-note" aria-label="Privacy summary">
+        <div class="gate-side-title">Why users trust it</div>
+        <ul class="gate-side-list">
+          <li>Tax calculations run in this browser.</li>
+          <li>Your draft stays in this tab unless you choose device storage.</li>
+          <li>You can clear everything from the page at any time.</li>
+        </ul>
+      </aside>
+    </div>
     <ul class="gate-list">
       <li>Do not file a federal return based on this estimate.</li>
       <li>Do not use this estimate to choose a payment amount.</li>
@@ -45,47 +70,130 @@
   </div>
 </section>
 
-<main class="container">
+<main class="container" id="mainContent" tabindex="-1">
   <section id="loading" class="loading" aria-live="polite">
     <div class="spinner" aria-hidden="true"></div>
     <div>Loading tax engine...</div>
   </section>
 
   <div id="app" class="app-shell hidden">
+    <section class="card welcome-panel" aria-labelledby="welcomeTitle">
+      <div class="welcome-layout">
+        <div class="welcome-copy">
+          <div class="notice-eyebrow">Start Here</div>
+          <h2 class="card-title" id="welcomeTitle">A calmer way to sanity-check your federal taxes</h2>
+          <p class="notice-copy">
+            TaxVault is built for people who want a fast estimate, a clear scope, and tighter
+            control over where their tax data goes.
+          </p>
+          <div class="welcome-pill-row" aria-label="Beginner guidance">
+            <span class="welcome-pill">About 5 to 10 minutes</span>
+            <span class="welcome-pill">Most common path: W-2 only</span>
+            <span class="welcome-pill">No account required</span>
+          </div>
+        </div>
+        <div class="welcome-grid">
+          <section class="welcome-box" aria-labelledby="welcomeFlowTitle">
+            <h3 class="welcome-box-title" id="welcomeFlowTitle">What you will do</h3>
+            <ol class="welcome-list">
+              <li>Choose your filing status and add the people on the estimate.</li>
+              <li>Enter only the W-2 or supported 1099 forms you actually have.</li>
+              <li>Review the estimate and save a local draft if that helps.</li>
+            </ol>
+          </section>
+          <section class="welcome-box" aria-labelledby="welcomeDocsTitle">
+            <h3 class="welcome-box-title" id="welcomeDocsTitle">Bring these details</h3>
+            <ul class="welcome-list">
+              <li>W-2, SSA-1099, 1099-INT, or 1099-DIV forms if you have them.</li>
+              <li>Names, SSNs, and dates of birth for people on the return.</li>
+              <li>Known IRA, HSA, or student loan interest amounts if they apply.</li>
+            </ul>
+          </section>
+        </div>
+      </div>
+    </section>
+
     <section class="card notice-card" aria-labelledby="scopeTitle">
       <div class="notice-eyebrow">Before You Start</div>
       <h2 class="card-title" id="scopeTitle">Estimate only, for a limited set of return types</h2>
       <p class="notice-copy">
         This is not a filing product. Do not use these numbers to file a tax return.
       </p>
-      <p class="notice-copy">
-        Supported: Single, Married Filing Jointly, or Head of Household. W-2 wages, SSA-1099
-        Social Security benefits and voluntary withholding, 1099-INT taxable and tax-exempt
-        interest, 1099-DIV ordinary and qualified dividends, standard deduction with age 65+ and
-        blindness adjustments, deductible traditional IRA amounts, deductible HSA amounts, student
-        loan interest, and child/dependent credits from the dependents you enter.
-      </p>
-      <p class="notice-copy notice-copy-strong">
-        Not yet supported: EIC, itemized deductions, pensions, IRA distributions, Schedule C,
-        capital gains, ACA credits, and most other forms. If you select Head of Household, you
-        must already know you qualify. TaxVault does not verify the IRS keeping-up-a-home rules.
-      </p>
+      <div class="scope-grid">
+        <section class="scope-column" aria-labelledby="scopeSupportedTitle">
+          <h3 class="scope-column-title" id="scopeSupportedTitle">Good fit for this estimate</h3>
+          <ul class="scope-column-list">
+            <li>Single, Married Filing Jointly, or Head of Household returns.</li>
+            <li>W-2 wages, SSA-1099 benefits, 1099-INT interest, and 1099-DIV dividends.</li>
+            <li>Standard deduction with age 65+ or blindness adjustments.</li>
+            <li>Known deductible IRA, HSA, and student loan interest amounts.</li>
+            <li>Dependents entered for child and dependent credit estimates.</li>
+          </ul>
+        </section>
+        <section class="scope-column scope-column-caution" aria-labelledby="scopeUnsupportedTitle">
+          <h3 class="scope-column-title" id="scopeUnsupportedTitle">Use a fuller tax product if you have</h3>
+          <ul class="scope-column-list">
+            <li>EIC, itemized deductions, pensions, IRA distributions, or self-employment income.</li>
+            <li>Capital gains, ACA credits, or most federal schedules and forms.</li>
+            <li>Any situation where you need filing-ready numbers or formal review.</li>
+            <li>Head of Household unless you already know you qualify under IRS rules.</li>
+          </ul>
+        </section>
+      </div>
     </section>
 
-    <div class="app-toolbar" aria-label="Draft storage and privacy tools">
-      <div class="toolbar-status" id="storageStatus" aria-live="polite">
-        Draft stays only in this tab and clears when the tab closes.
+    <section class="card trust-panel" aria-labelledby="trustTitle">
+      <div class="card-header">
+        <div>
+          <div class="notice-eyebrow">Privacy &amp; Security</div>
+          <h2 class="card-title" id="trustTitle">Make the privacy story obvious</h2>
+          <p class="card-subtitle">
+            TaxVault stands out when people immediately understand what stays local and what stays
+            under their control.
+          </p>
+        </div>
       </div>
-      <div class="toolbar-actions">
-        <label class="checkbox-field toolbar-toggle" for="rememberDraftToggle">
-          <input id="rememberDraftToggle" type="checkbox">
-          <span>Remember this draft on this device</span>
-        </label>
-        <button class="btn btn-secondary btn-small" id="clearAllBtn" type="button">
-          Clear All Data
-        </button>
+      <div class="trust-grid">
+        <article class="trust-item">
+          <h3 class="trust-item-title">Processed locally</h3>
+          <p class="trust-item-copy">
+            Tax math runs in this browser using the local TaxVault engine.
+          </p>
+        </article>
+        <article class="trust-item">
+          <h3 class="trust-item-title">No cloud upload required</h3>
+          <p class="trust-item-copy">
+            You can type from your forms or preview them on screen without sending them away.
+          </p>
+        </article>
+        <article class="trust-item">
+          <h3 class="trust-item-title">You control retention</h3>
+          <p class="trust-item-copy" id="storageTrustCopy">
+            By default your draft stays only in this tab and clears when the tab closes.
+          </p>
+        </article>
+        <article class="trust-item">
+          <h3 class="trust-item-title">Clear any time</h3>
+          <p class="trust-item-copy">
+            Use Clear All Data to wipe names, SSNs, forms, and results from this device.
+          </p>
+        </article>
       </div>
-    </div>
+      <div class="app-toolbar" aria-label="Draft storage and privacy tools">
+        <div class="toolbar-status" id="storageStatus" aria-live="polite">
+          Draft stays only in this tab and clears when the tab closes.
+        </div>
+        <div class="toolbar-actions">
+          <label class="checkbox-field toolbar-toggle" for="rememberDraftToggle">
+            <input id="rememberDraftToggle" type="checkbox">
+            <span>Remember this draft on this device</span>
+          </label>
+          <button class="btn btn-secondary btn-small" id="clearAllBtn" type="button">
+            Clear All Data
+          </button>
+        </div>
+      </div>
+    </section>
     <div id="uiStatus" class="sr-only" aria-live="polite"></div>
 
     <nav class="steps" aria-label="Return steps">
@@ -108,14 +216,31 @@
     <div id="error" class="error-banner" role="alert" aria-live="assertive" hidden></div>
 
     <section class="step-section active" id="step1" aria-labelledby="aboutYouTitle">
+      <div class="section-intro">
+        <div class="section-intro-step">Step 1 of 3</div>
+        <h2 class="section-intro-title">Set up the people on this estimate</h2>
+        <p class="section-intro-copy">
+          Choose the filing status you usually use, then enter the people on the return. SSN fields
+          stay hidden by default, and dates of birth help TaxVault apply age-based deduction rules.
+        </p>
+      </div>
+
       <div class="card">
         <h2 class="card-title" id="filingStatusTitle">Filing Status</h2>
-        <div class="status-options" role="group" aria-labelledby="filingStatusTitle">
+        <p class="card-subtitle">Choose the status you usually file with on your federal return.</p>
+        <div
+          class="status-options"
+          id="filingStatusOptions"
+          role="radiogroup"
+          aria-labelledby="filingStatusTitle"
+        >
           <button
             type="button"
             class="status-option selected"
             data-status="single"
-            aria-pressed="true"
+            role="radio"
+            aria-checked="true"
+            tabindex="0"
           >
             <span class="status-title">Single</span>
             <span class="status-desc">Unmarried or legally separated</span>
@@ -124,7 +249,9 @@
             type="button"
             class="status-option"
             data-status="married_filing_jointly"
-            aria-pressed="false"
+            role="radio"
+            aria-checked="false"
+            tabindex="-1"
           >
             <span class="status-title">Married Filing Jointly</span>
             <span class="status-desc">Filing together with your spouse</span>
@@ -133,7 +260,9 @@
             type="button"
             class="status-option"
             data-status="head_of_household"
-            aria-pressed="false"
+            role="radio"
+            aria-checked="false"
+            tabindex="-1"
           >
             <span class="status-title">Head of Household</span>
             <span class="status-desc">Unmarried with a qualifying dependent</span>
@@ -170,10 +299,15 @@
                 Show
               </button>
             </div>
+            <div class="field-hint">
+              Hidden on screen by default. Used locally to validate the return and build the draft
+              preview.
+            </div>
           </div>
           <div class="field">
             <label for="pDob">Date of Birth</label>
-            <input id="pDob" type="date" autocomplete="bday">
+            <input id="pDob" type="date" autocomplete="bday" data-date-kind="dob">
+            <div class="field-hint">Used to determine age-based standard deduction rules.</div>
           </div>
         </div>
         <div class="checkbox-row">
@@ -213,10 +347,15 @@
                 Show
               </button>
             </div>
+            <div class="field-hint">
+              Hidden on screen by default. Used locally to validate the return and build the draft
+              preview.
+            </div>
           </div>
           <div class="field">
             <label for="sDob">Date of Birth</label>
-            <input id="sDob" type="date" autocomplete="bday">
+            <input id="sDob" type="date" autocomplete="bday" data-date-kind="dob">
+            <div class="field-hint">Used to determine age-based standard deduction rules.</div>
           </div>
         </div>
         <div class="checkbox-row">
@@ -247,14 +386,32 @@
     </section>
 
     <section class="step-section" id="step2" aria-labelledby="incomeTitle">
+      <div class="section-intro section-intro-accent">
+        <div class="section-intro-step">Step 2 of 3</div>
+        <h2 class="section-intro-title">Enter only the forms you actually have</h2>
+        <p class="section-intro-copy">
+          Most beginners start with the W-2 section and skip the rest. If a section does not apply
+          to you, leave it alone.
+        </p>
+        <div class="summary-chip-row" id="incomeSummaryChips" aria-live="polite"></div>
+      </div>
+
+      <nav class="step-jump-nav" aria-label="Jump to Step 2 sections">
+        <a class="step-jump-link" href="#w2Section">W-2</a>
+        <a class="step-jump-link" href="#interestSection">1099-INT</a>
+        <a class="step-jump-link" href="#socialSecuritySection">SSA-1099</a>
+        <a class="step-jump-link" href="#dividendSection">1099-DIV</a>
+        <a class="step-jump-link" href="#adjustmentsSection">Adjustments</a>
+      </nav>
+
       <div class="card support-review-card" id="supportReviewCard" aria-live="polite">
         <div class="support-review-header">
           <div>
             <div class="notice-eyebrow">Estimate Readiness</div>
-            <h2 class="card-title">Support Review</h2>
+            <h2 class="card-title">Can TaxVault estimate this draft?</h2>
             <p class="card-subtitle" id="supportReviewSummary">
-              Add at least one supported income form to see whether this draft fits TaxVault's
-              current estimate slice.
+              Start with the forms you actually have. TaxVault will tell you whether this draft
+              fits the supported estimate scope.
             </p>
           </div>
           <span class="support-review-badge pending" id="supportReviewBadge">In Progress</span>
@@ -269,7 +426,7 @@
         </div>
       </div>
 
-      <div class="card">
+      <div class="card" id="w2Section">
         <div class="card-header">
           <h2 class="card-title" id="incomeTitle">W-2 Wage Statements</h2>
           <p class="card-subtitle">
@@ -321,7 +478,7 @@
         <div id="w2Container"></div>
         <button class="btn-add-w2" id="addW2Btn" type="button">+ Add another W-2</button>
       </div>
-      <div class="card">
+      <div class="card" id="interestSection">
         <div class="card-header">
           <h2 class="card-title">1099-INT Interest Statements</h2>
           <p class="card-subtitle">
@@ -369,7 +526,7 @@
           + Add 1099-INT
         </button>
       </div>
-      <div class="card">
+      <div class="card" id="socialSecuritySection">
         <div class="card-header">
           <h2 class="card-title">SSA-1099 Social Security Benefit Statements</h2>
           <p class="card-subtitle">
@@ -410,7 +567,7 @@
           + Add SSA-1099
         </button>
       </div>
-      <div class="card">
+      <div class="card" id="dividendSection">
         <div class="card-header">
           <h2 class="card-title">1099-DIV Dividend Statements</h2>
           <p class="card-subtitle">
@@ -453,7 +610,7 @@
           + Add 1099-DIV
         </button>
       </div>
-      <div class="card">
+      <div class="card" id="adjustmentsSection">
         <div class="card-header">
           <h2 class="card-title">Adjustments to Income</h2>
           <p class="card-subtitle">
@@ -506,11 +663,29 @@
       </div>
       <div class="actions">
         <button class="btn btn-secondary" id="step2BackBtn" type="button">Back</button>
-        <button class="btn btn-primary" id="computeBtn" type="button" disabled>Calculate My Estimate</button>
+        <button
+          class="btn btn-primary"
+          id="computeBtn"
+          type="button"
+          aria-describedby="computeHelp"
+          disabled
+        >
+          Calculate My Estimate
+        </button>
       </div>
+      <p class="compute-help" id="computeHelp" aria-live="polite"></p>
     </section>
 
     <section class="step-section" id="step3" aria-labelledby="resultTitle">
+      <div class="section-intro">
+        <div class="section-intro-step">Step 3 of 3</div>
+        <h2 class="section-intro-title">Review the estimate and keep it local if you want</h2>
+        <p class="section-intro-copy">
+          Use these numbers for planning only. If you want a PDF copy, print from your browser and
+          clear the page when you are done.
+        </p>
+      </div>
+
       <div class="card result-warning-card">
         <div class="notice-eyebrow">Do Not File</div>
         <h2 class="card-title">These numbers are not filing-ready.</h2>
@@ -611,7 +786,8 @@
 
 <footer class="footer">
   <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
-  Runs entirely in your browser. Clear the page when finished. Do not file from this estimate.
+  Private by design: tax entries stay in your browser and clear with this tab unless you choose
+  device storage. Do not file from this estimate.
 </footer>
 
 <script type="module" src="./app.js"></script>
