@@ -674,7 +674,7 @@ function captureDraftSnapshot() {
 
 function stripPiiFromSnapshot(snapshot) {
   const redactFiler = (filer) => {
-    if (!filer) {
+    if (!filer || typeof filer !== "object" || Array.isArray(filer)) {
       return filer;
     }
     const copy = { ...filer };
@@ -682,20 +682,36 @@ function stripPiiFromSnapshot(snapshot) {
     return copy;
   };
 
+  const redactDependent = (dep) => {
+    if (!dep || typeof dep !== "object" || Array.isArray(dep)) {
+      return dep;
+    }
+    const copy = { ...dep };
+    delete copy.ssn;
+    return copy;
+  };
+
+  const redactW2 = (w2) => {
+    if (!w2 || typeof w2 !== "object" || Array.isArray(w2)) {
+      return w2;
+    }
+    const copy = { ...w2 };
+    delete copy.employerEin;
+    return copy;
+  };
+
   return {
     ...snapshot,
     primaryFiler: redactFiler(snapshot.primaryFiler),
     spouse: redactFiler(snapshot.spouse),
-    dependents: (snapshot.dependents || []).map((dep) => {
-      const copy = { ...dep };
-      delete copy.ssn;
-      return copy;
-    }),
-    w2s: (snapshot.w2s || []).map((w2) => {
-      const copy = { ...w2 };
-      delete copy.employerEin;
-      return copy;
-    }),
+    dependents: Array.isArray(snapshot.dependents)
+      ? snapshot.dependents
+          .map(redactDependent)
+          .filter((dep) => dep && typeof dep === "object" && !Array.isArray(dep))
+      : [],
+    w2s: Array.isArray(snapshot.w2s)
+      ? snapshot.w2s.map(redactW2).filter((w2) => w2 && typeof w2 === "object" && !Array.isArray(w2))
+      : [],
   };
 }
 

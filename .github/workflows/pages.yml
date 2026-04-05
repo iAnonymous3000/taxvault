@@ -35,6 +35,9 @@ jobs:
         working-directory: crates/taxvault-wasm
         run: wasm-pack build --target web --out-dir ../../web/pkg --release
 
+      - name: Check web app JavaScript syntax
+        run: node --check web/app.js
+
       - name: Disable Jekyll
         run: touch web/.nojekyll
 
