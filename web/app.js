@@ -871,6 +871,24 @@ function isPlainObject(value) {
   return Boolean(value) && typeof value === "object" && !Array.isArray(value);
 }
 
+function readControlValue(control) {
+  return typeof control?.value === "string" ? control.value : "";
+}
+
+function readTrimmedControlValue(control) {
+  return readControlValue(control).trim();
+}
+
+function readQueryValue(root, selector) {
+  const control =
+    root && typeof root.querySelector === "function" ? root.querySelector(selector) : null;
+  return readControlValue(control);
+}
+
+function readTrimmedQueryValue(root, selector) {
+  return readQueryValue(root, selector).trim();
+}
+
 function captureDraftSnapshot() {
   return {
     savedAt: new Date().toISOString(),
@@ -880,49 +898,49 @@ function captureDraftSnapshot() {
     primaryFiler: readFilerInputs("p"),
     spouse: readFilerInputs("s"),
     adjustments: {
-      traditionalIraDeduction: els.traditionalIraDeduction.value.trim(),
-      hsaDeduction: els.hsaDeduction.value.trim(),
-      studentLoanInterestPaid: els.studentLoanInterestPaid.value.trim(),
+      traditionalIraDeduction: readTrimmedControlValue(els.traditionalIraDeduction),
+      hsaDeduction: readTrimmedControlValue(els.hsaDeduction),
+      studentLoanInterestPaid: readTrimmedControlValue(els.studentLoanInterestPaid),
     },
     dependents: Array.from(els.dependentContainer.querySelectorAll(".dependent-card")).map((card) => ({
-      firstName: card.querySelector(".dep-first").value.trim(),
-      lastName: card.querySelector(".dep-last").value.trim(),
-      ssn: card.querySelector(".dep-ssn").value.trim(),
-      dob: card.querySelector(".dep-dob").value,
-      relationship: card.querySelector(".dep-relationship").value,
-      monthsLivedInHome: card.querySelector(".dep-months").value.trim(),
+      firstName: readTrimmedQueryValue(card, ".dep-first"),
+      lastName: readTrimmedQueryValue(card, ".dep-last"),
+      ssn: readTrimmedQueryValue(card, ".dep-ssn"),
+      dob: readQueryValue(card, ".dep-dob"),
+      relationship: readQueryValue(card, ".dep-relationship"),
+      monthsLivedInHome: readTrimmedQueryValue(card, ".dep-months"),
     })),
     w2s: Array.from(els.w2Container.querySelectorAll(".w2-card")).map((card) => ({
-      employerName: card.querySelector(".w2-employer").value.trim(),
-      recipient: card.querySelector(".w2-recipient").value,
-      employerEin: card.querySelector(".w2-ein").value.trim(),
-      federalTaxWithheld: card.querySelector(".w2-fed-wh").value.trim(),
-      wages: card.querySelector(".w2-wages").value.trim(),
-      stateTaxWithheld: card.querySelector(".w2-state-wh").value.trim(),
-      socialSecurityWages: card.querySelector(".w2-ss-wages").value.trim(),
-      socialSecurityTaxWithheld: card.querySelector(".w2-ss-wh").value.trim(),
-      medicareWages: card.querySelector(".w2-med-wages").value.trim(),
-      medicareTaxWithheld: card.querySelector(".w2-med-wh").value.trim(),
-      advancedOpen: card.querySelector(".w2-advanced-fields").classList.contains("open"),
+      employerName: readTrimmedQueryValue(card, ".w2-employer"),
+      recipient: readQueryValue(card, ".w2-recipient"),
+      employerEin: readTrimmedQueryValue(card, ".w2-ein"),
+      federalTaxWithheld: readTrimmedQueryValue(card, ".w2-fed-wh"),
+      wages: readTrimmedQueryValue(card, ".w2-wages"),
+      stateTaxWithheld: readTrimmedQueryValue(card, ".w2-state-wh"),
+      socialSecurityWages: readTrimmedQueryValue(card, ".w2-ss-wages"),
+      socialSecurityTaxWithheld: readTrimmedQueryValue(card, ".w2-ss-wh"),
+      medicareWages: readTrimmedQueryValue(card, ".w2-med-wages"),
+      medicareTaxWithheld: readTrimmedQueryValue(card, ".w2-med-wh"),
+      advancedOpen: card.querySelector(".w2-advanced-fields")?.classList.contains("open") ?? false,
     })),
     socialSecurityIncome: Array.from(els.socialSecurityContainer.querySelectorAll(".ssa-card")).map(
       (card) => ({
-        recipient: card.querySelector(".ssa-recipient").value,
-        totalBenefits: card.querySelector(".ssa-benefits").value.trim(),
-        voluntaryWithholding: card.querySelector(".ssa-withholding").value.trim(),
+        recipient: readQueryValue(card, ".ssa-recipient"),
+        totalBenefits: readTrimmedQueryValue(card, ".ssa-benefits"),
+        voluntaryWithholding: readTrimmedQueryValue(card, ".ssa-withholding"),
       })
     ),
     interestIncome: Array.from(els.interestContainer.querySelectorAll(".interest-card")).map((card) => ({
-      payerName: card.querySelector(".interest-payer").value.trim(),
-      recipient: card.querySelector(".interest-recipient").value,
-      taxableInterest: card.querySelector(".interest-taxable").value.trim(),
-      taxExemptInterest: card.querySelector(".interest-tax-exempt").value.trim(),
+      payerName: readTrimmedQueryValue(card, ".interest-payer"),
+      recipient: readQueryValue(card, ".interest-recipient"),
+      taxableInterest: readTrimmedQueryValue(card, ".interest-taxable"),
+      taxExemptInterest: readTrimmedQueryValue(card, ".interest-tax-exempt"),
     })),
     dividendIncome: Array.from(els.dividendContainer.querySelectorAll(".dividend-card")).map((card) => ({
-      payerName: card.querySelector(".dividend-payer").value.trim(),
-      recipient: card.querySelector(".dividend-recipient").value,
-      ordinaryDividends: card.querySelector(".dividend-ordinary").value.trim(),
-      qualifiedDividends: card.querySelector(".dividend-qualified").value.trim(),
+      payerName: readTrimmedQueryValue(card, ".dividend-payer"),
+      recipient: readQueryValue(card, ".dividend-recipient"),
+      ordinaryDividends: readTrimmedQueryValue(card, ".dividend-ordinary"),
+      qualifiedDividends: readTrimmedQueryValue(card, ".dividend-qualified"),
     })),
   };
 }
@@ -2115,11 +2133,11 @@ function validateStep1() {
 
 function readFilerInputs(prefix) {
   return {
-    firstName: document.getElementById(`${prefix}First`).value.trim(),
-    lastName: document.getElementById(`${prefix}Last`).value.trim(),
-    ssn: document.getElementById(`${prefix}Ssn`).value.trim(),
-    dob: document.getElementById(`${prefix}Dob`).value,
-    isBlind: document.getElementById(`${prefix}Blind`).checked,
+    firstName: readTrimmedControlValue(document.getElementById(`${prefix}First`)),
+    lastName: readTrimmedControlValue(document.getElementById(`${prefix}Last`)),
+    ssn: readTrimmedControlValue(document.getElementById(`${prefix}Ssn`)),
+    dob: readControlValue(document.getElementById(`${prefix}Dob`)),
+    isBlind: Boolean(document.getElementById(`${prefix}Blind`)?.checked),
   };
 }
 
@@ -2481,7 +2499,7 @@ function addW2({ focusNewCard = true } = {}) {
   resetComputedEstimate();
   scheduleSupportReview();
   scheduleDraftSave();
-  announceUiStatus(`Added W-2 #${els.w2Container.children.length}.`);
+  announceUiStatus(`Added W-2 #${state.w2Count}.`);
   if (focusNewCard) {
     focusFirstField(card, ".w2-employer");
   }
@@ -2535,7 +2553,7 @@ function addSocialSecurity({ focusNewCard = true } = {}) {
   resetComputedEstimate();
   scheduleSupportReview();
   scheduleDraftSave();
-  announceUiStatus(`Added SSA-1099 #${els.socialSecurityContainer.children.length}.`);
+  announceUiStatus(`Added SSA-1099 #${state.socialSecurityCount}.`);
   if (focusNewCard) {
     focusFirstField(card, ".ssa-benefits");
   }
@@ -2600,7 +2618,7 @@ function addInterest({ focusNewCard = true } = {}) {
   resetComputedEstimate();
   scheduleSupportReview();
   scheduleDraftSave();
-  announceUiStatus(`Added 1099-INT #${els.interestContainer.children.length}.`);
+  announceUiStatus(`Added 1099-INT #${state.interestCount}.`);
   if (focusNewCard) {
     focusFirstField(card, ".interest-taxable");
   }
@@ -2665,7 +2683,7 @@ function addDividend({ focusNewCard = true } = {}) {
   resetComputedEstimate();
   scheduleSupportReview();
   scheduleDraftSave();
-  announceUiStatus(`Added 1099-DIV #${els.dividendContainer.children.length}.`);
+  announceUiStatus(`Added 1099-DIV #${state.dividendCount}.`);
   if (focusNewCard) {
     focusFirstField(card, ".dividend-ordinary");
   }
@@ -2680,7 +2698,7 @@ function addDependent({ focusNewCard = true } = {}) {
 
   state.dependentCount += 1;
   const idPrefix = `dep-${state.dependentCount}`;
-  const card = createCardSection("w2-card dependent-card", state.dependentCount);
+  const card = createCardSection("dependent-card", state.dependentCount);
   card.append(
     createCardHeader(`Dependent #${state.dependentCount}`, "remove-dependent-btn"),
     createRow(
@@ -2753,7 +2771,7 @@ function addDependent({ focusNewCard = true } = {}) {
   updateDependentRemoveButtons();
   resetComputedEstimate();
   scheduleDraftSave();
-  announceUiStatus(`Added dependent #${els.dependentContainer.children.length}.`);
+  announceUiStatus(`Added dependent #${state.dependentCount}.`);
   if (focusNewCard) {
     focusFirstField(card, ".dep-first");
   }
@@ -3269,12 +3287,12 @@ function collectDependents(errors, { requireAtLeastOne = false } = {}) {
   const cards = Array.from(els.dependentContainer.querySelectorAll(".dependent-card"));
 
   cards.forEach((card, index) => {
-    const firstName = card.querySelector(".dep-first").value.trim();
-    const lastName = card.querySelector(".dep-last").value.trim();
-    const ssn = card.querySelector(".dep-ssn").value.trim();
-    const dob = card.querySelector(".dep-dob").value;
-    const relationship = card.querySelector(".dep-relationship").value;
-    const rawMonths = card.querySelector(".dep-months").value.trim();
+    const firstName = readTrimmedQueryValue(card, ".dep-first");
+    const lastName = readTrimmedQueryValue(card, ".dep-last");
+    const ssn = readTrimmedQueryValue(card, ".dep-ssn");
+    const dob = readQueryValue(card, ".dep-dob");
+    const relationship = readQueryValue(card, ".dep-relationship");
+    const rawMonths = readTrimmedQueryValue(card, ".dep-months");
     const label = `Dependent #${index + 1}`;
 
     const isBlank =
@@ -3346,9 +3364,9 @@ function collectInterestCards(errors) {
   const cards = Array.from(els.interestContainer.querySelectorAll(".interest-card"));
 
   cards.forEach((card, index) => {
-    const payerName = card.querySelector(".interest-payer").value.trim();
-    const rawTaxable = card.querySelector(".interest-taxable").value.trim();
-    const rawTaxExempt = card.querySelector(".interest-tax-exempt").value.trim();
+    const payerName = readTrimmedQueryValue(card, ".interest-payer");
+    const rawTaxable = readTrimmedQueryValue(card, ".interest-taxable");
+    const rawTaxExempt = readTrimmedQueryValue(card, ".interest-tax-exempt");
     const label = `1099-INT #${index + 1}`;
     const isBlank = payerName === "" && rawTaxable === "" && rawTaxExempt === "";
 
@@ -3380,7 +3398,7 @@ function collectInterestCards(errors) {
     }
 
     interestIncome.push({
-      recipient: card.querySelector(".interest-recipient").value,
+      recipient: readQueryValue(card, ".interest-recipient"),
       payer_name: payerName,
       taxable_interest: taxableInterest,
       tax_exempt_interest: taxExemptInterest,
@@ -3395,8 +3413,8 @@ function collectSocialSecurityCards(errors) {
   const cards = Array.from(els.socialSecurityContainer.querySelectorAll(".ssa-card"));
 
   cards.forEach((card, index) => {
-    const rawBenefits = card.querySelector(".ssa-benefits").value.trim();
-    const rawWithholding = card.querySelector(".ssa-withholding").value.trim();
+    const rawBenefits = readTrimmedQueryValue(card, ".ssa-benefits");
+    const rawWithholding = readTrimmedQueryValue(card, ".ssa-withholding");
     const label = `SSA-1099 #${index + 1}`;
     const isBlank = rawBenefits === "" && rawWithholding === "";
 
@@ -3427,7 +3445,7 @@ function collectSocialSecurityCards(errors) {
     }
 
     socialSecurityIncome.push({
-      recipient: card.querySelector(".ssa-recipient").value,
+      recipient: readQueryValue(card, ".ssa-recipient"),
       total_benefits: totalBenefits,
       voluntary_withholding: voluntaryWithholding,
     });
@@ -3441,9 +3459,9 @@ function collectDividendCards(errors) {
   const cards = Array.from(els.dividendContainer.querySelectorAll(".dividend-card"));
 
   cards.forEach((card, index) => {
-    const payerName = card.querySelector(".dividend-payer").value.trim();
-    const rawOrdinary = card.querySelector(".dividend-ordinary").value.trim();
-    const rawQualified = card.querySelector(".dividend-qualified").value.trim();
+    const payerName = readTrimmedQueryValue(card, ".dividend-payer");
+    const rawOrdinary = readTrimmedQueryValue(card, ".dividend-ordinary");
+    const rawQualified = readTrimmedQueryValue(card, ".dividend-qualified");
     const label = `1099-DIV #${index + 1}`;
     const isBlank = payerName === "" && rawOrdinary === "" && rawQualified === "";
 
@@ -3482,7 +3500,7 @@ function collectDividendCards(errors) {
     }
 
     dividendIncome.push({
-      recipient: card.querySelector(".dividend-recipient").value,
+      recipient: readQueryValue(card, ".dividend-recipient"),
       payer_name: payerName,
       ordinary_dividends: ordinaryDividends,
       qualified_dividends: qualifiedDividends,
@@ -3497,15 +3515,15 @@ function collectW2Cards(errors) {
   const cards = Array.from(els.w2Container.querySelectorAll(".w2-card"));
 
   cards.forEach((card, index) => {
-    const employerName = card.querySelector(".w2-employer").value.trim();
-    const employerEin = card.querySelector(".w2-ein").value.trim();
-    const rawWages = card.querySelector(".w2-wages").value.trim();
-    const rawFedWh = card.querySelector(".w2-fed-wh").value.trim();
-    const rawStateWh = card.querySelector(".w2-state-wh").value.trim();
-    const rawSsWages = card.querySelector(".w2-ss-wages").value.trim();
-    const rawSsWh = card.querySelector(".w2-ss-wh").value.trim();
-    const rawMedWages = card.querySelector(".w2-med-wages").value.trim();
-    const rawMedWh = card.querySelector(".w2-med-wh").value.trim();
+    const employerName = readTrimmedQueryValue(card, ".w2-employer");
+    const employerEin = readTrimmedQueryValue(card, ".w2-ein");
+    const rawWages = readTrimmedQueryValue(card, ".w2-wages");
+    const rawFedWh = readTrimmedQueryValue(card, ".w2-fed-wh");
+    const rawStateWh = readTrimmedQueryValue(card, ".w2-state-wh");
+    const rawSsWages = readTrimmedQueryValue(card, ".w2-ss-wages");
+    const rawSsWh = readTrimmedQueryValue(card, ".w2-ss-wh");
+    const rawMedWages = readTrimmedQueryValue(card, ".w2-med-wages");
+    const rawMedWh = readTrimmedQueryValue(card, ".w2-med-wh");
     const label = `W-2 #${index + 1}`;
 
     const isBlank =
@@ -3585,7 +3603,7 @@ function collectW2Cards(errors) {
     }
 
     w2s.push({
-      recipient: card.querySelector(".w2-recipient").value,
+      recipient: readQueryValue(card, ".w2-recipient"),
       employer_name: employerName,
       employer_ein: employerEin,
       wages,
@@ -4955,9 +4973,11 @@ function clearAllData() {
 }
 
 function todayIsoDate() {
-  const today = new Date();
-  const local = new Date(today.getTime() - today.getTimezoneOffset() * 60_000);
-  return local.toISOString().slice(0, 10);
+  return new Intl.DateTimeFormat("en-CA", {
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).format(new Date());
 }
 
 function createElement(tagName, { className = "", text = "", attributes = {} } = {}) {

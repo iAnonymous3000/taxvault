@@ -1005,7 +1005,8 @@ body.gate-open {
   font-size: 0.78rem;
 }
 
-.w2-card {
+.w2-card,
+.dependent-card {
   margin-bottom: 0.85rem;
   padding: 1.15rem;
   border: 1.5px solid var(--border-default);
