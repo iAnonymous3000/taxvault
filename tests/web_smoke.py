@@ -478,6 +478,25 @@ class WebSmokeTests(unittest.TestCase):
         self.assertTrue(any("machine-checked" in item for item in cautions))
         self.assertFalse(self.browser.is_disabled("#computeBtn"))
 
+    def test_estimate_year_selector_reflects_embedded_runtime_config(self):
+        self.open_app()
+
+        self.assertEqual(self.browser.value("#taxYearSelect"), "2025")
+        self.assertTrue(self.browser.is_disabled("#taxYearSelect"))
+
+        runtime_config = self.browser.execute(
+            """
+            return window.__taxvaultTesting
+              ? window.__taxvaultTesting.getRuntimeConfig()
+              : null;
+            """
+        )
+        self.assertIsNotNone(runtime_config)
+        self.assertEqual(runtime_config["selectedTaxYear"], 2025)
+        self.assertEqual(len(runtime_config["supportedTaxYears"]), 1)
+        self.assertEqual(runtime_config["supportedTaxYears"][0]["taxYear"], 2025)
+        self.assertTrue(runtime_config["supportedTaxYears"][0]["available"])
+
     def test_unsupported_return_shows_blocking_issue_before_compute(self):
         self.open_app()
         self.fill_step1_single()
@@ -547,6 +566,142 @@ class WebSmokeTests(unittest.TestCase):
         self.assertIn("Line 1a", draft_text)
         self.assertIn("Wages, salaries, tips", draft_text)
         self.assertIn("Estimated refund", draft_text)
+
+    def test_audit_trail_export_captures_sanitized_input_review_status_and_computed_output(self):
+        self.open_app()
+        self.fill_step1_single()
+        self.add_supported_w2()
+
+        self.wait_for_ready_review()
+        self.browser.click("#computeBtn")
+        self.browser.wait_for(
+            lambda: self.browser.class_list_contains("#step3", "active"),
+            "step 3 never became active after compute",
+        )
+        self.assertFalse(self.browser.is_disabled("#exportAuditBtn"))
+
+        audit_trail = self.browser.execute(
+            """
+            return window.__taxvaultTesting
+              ? window.__taxvaultTesting.exportCurrentAuditTrail()
+              : null;
+            """
+        )
+        self.assertIsNotNone(audit_trail)
+        self.assertEqual(audit_trail["type"], "taxvault-audit-trail")
+        self.assertEqual(audit_trail["version"], 1)
+        self.assertEqual(audit_trail["taxYear"], 2025)
+        self.assertEqual(audit_trail["draftEnvelope"]["type"], "taxvault-draft")
+        self.assertTrue(audit_trail["draftEnvelope"]["piiRedacted"])
+        self.assertEqual(audit_trail["supportReview"]["status"], "ready")
+        self.assertTrue(audit_trail["supportReview"]["readyForEstimate"])
+        self.assertEqual(audit_trail["estimate"]["form"]["formId"], "1040")
+        self.assertEqual(audit_trail["estimate"]["form"]["taxYear"], 2025)
+        self.assertIn("1a", audit_trail["estimate"]["form"]["lines"])
+        self.assertTrue(
+            any(
+                row.get("label") == "Total Wages" and row.get("formattedValue") == "$60,000.00"
+                for row in audit_trail["estimate"]["breakdown"]
+                if isinstance(row, dict)
+            )
+        )
+        self.assertTrue(audit_trail["estimate"]["trace"])
+
+        audit_raw = json.dumps(audit_trail)
+        self.assertNotIn("400-01-0001", audit_raw)
+        self.assertNotIn("12-3456789", audit_raw)
+
+    def test_review_packet_export_renders_a_readable_redacted_html_packet(self):
+        self.open_app()
+        self.fill_step1_single()
+        self.add_supported_w2()
+
+        self.wait_for_ready_review()
+        self.browser.click("#computeBtn")
+        self.browser.wait_for(
+            lambda: self.browser.class_list_contains("#step3", "active"),
+            "step 3 never became active after compute",
+        )
+        self.assertFalse(self.browser.is_disabled("#exportReviewPacketBtn"))
+
+        review_packet_html = self.browser.execute(
+            """
+            return window.__taxvaultTesting
+              ? window.__taxvaultTesting.exportCurrentReviewPacketHtml()
+              : null;
+            """
+        )
+        self.assertIsNotNone(review_packet_html)
+        self.assertIn("TaxVault Review Packet", review_packet_html)
+        self.assertIn("Estimated Federal Refund", review_packet_html)
+        self.assertIn("Alex Filer", review_packet_html)
+        self.assertIn("Northwind Co", review_packet_html)
+        self.assertIn("Calculation Trace", review_packet_html)
+        self.assertIn("Draft Form 1040 Lines", review_packet_html)
+        self.assertNotIn("400-01-0001", review_packet_html)
+        self.assertNotIn("12-3456789", review_packet_html)
+
+    def test_draft_export_and_import_round_trip_through_versioned_envelope(self):
+        self.open_app()
+        self.fill_step1_single()
+        self.add_supported_w2()
+
+        exported_draft = self.browser.execute(
+            """
+            return window.__taxvaultTesting
+              ? window.__taxvaultTesting.exportCurrentDraftEnvelope()
+              : null;
+            """
+        )
+        self.assertIsNotNone(exported_draft)
+        self.assertEqual(exported_draft["type"], "taxvault-draft")
+        self.assertEqual(exported_draft["version"], 2)
+        self.assertEqual(exported_draft["taxYear"], 2025)
+        self.assertTrue(exported_draft["piiRedacted"])
+        self.assertEqual(exported_draft["draft"]["primaryFiler"]["firstName"], "Alex")
+
+        exported_raw = json.dumps(exported_draft)
+        self.assertNotIn("400-01-0001", exported_raw)
+        self.assertNotIn("12-3456789", exported_raw)
+
+        self.browser.execute(
+            """
+            window.localStorage.clear();
+            window.sessionStorage.clear();
+            return true;
+            """
+        )
+
+        self.open_app()
+        imported = self.browser.execute(
+            """
+            if (!window.__taxvaultTesting) {
+              return { ok: false, message: "testing hooks unavailable" };
+            }
+
+            return window.__taxvaultTesting.importDraftValue(arguments[0]);
+            """,
+            [exported_draft],
+        )
+        self.assertTrue(imported["ok"], imported.get("message"))
+
+        self.browser.wait_for(
+            lambda: self.browser.value("#pFirst") == "Alex",
+            "imported draft never restored the primary filer",
+        )
+        self.assertEqual(self.browser.value("#pSsn"), "")
+        self.assertEqual(self.browser.value("#w2-1-employer"), "Northwind Co")
+        self.assertEqual(self.browser.value("#w2-1-ein"), "")
+        self.assertIn("Draft imported.", self.browser.text("#storageStatus"))
+
+        stored_snapshot = self.browser.execute(
+            'return window.sessionStorage.getItem("taxvault:draft:session:2025");'
+        )
+        self.assertIsNotNone(stored_snapshot)
+        stored_draft = json.loads(stored_snapshot)
+        self.assertEqual(stored_draft["type"], "taxvault-draft")
+        self.assertEqual(stored_draft["version"], 2)
+        self.assertEqual(stored_draft["taxYear"], 2025)
 
     def test_legacy_saved_draft_restores_without_ssns_or_eins(self):
         legacy_snapshot = {
@@ -632,6 +787,10 @@ class WebSmokeTests(unittest.TestCase):
             'return window.localStorage.getItem("taxvault:draft:local:2025");'
         )
         self.assertIsNotNone(stored_snapshot)
+        stored_draft = json.loads(stored_snapshot)
+        self.assertEqual(stored_draft["type"], "taxvault-draft")
+        self.assertEqual(stored_draft["version"], 2)
+        self.assertEqual(stored_draft["taxYear"], 2025)
         self.assertNotIn("400-01-0001", stored_snapshot)
         self.assertNotIn("12-3456789", stored_snapshot)
         self.assertIn("Northwind Co", stored_snapshot)

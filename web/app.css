@@ -1392,7 +1392,10 @@ body.gate-open {
 
 .draft-actions {
   display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
   flex-shrink: 0;
+  justify-content: flex-end;
 }
 
 .draft-sheet {

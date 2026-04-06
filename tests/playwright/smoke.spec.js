@@ -217,6 +217,26 @@ test("landing page surfaces the public GitHub repo and privacy controls", async 
   await expect(page.getByText("Open source and auditable")).toBeVisible();
 });
 
+test("estimate year selector reflects the embedded runtime config", async ({ page }) => {
+  await openApp(page);
+
+  await expect(page.locator("#taxYearSelect")).toHaveValue("2025");
+  await expect(page.locator("#taxYearSelect")).toBeDisabled();
+
+  const runtimeConfig = await page.evaluate(() => {
+    if (!window.__taxvaultTesting) {
+      return null;
+    }
+
+    return window.__taxvaultTesting.getRuntimeConfig();
+  });
+  expect(runtimeConfig).not.toBeNull();
+  expect(runtimeConfig.selectedTaxYear).toBe(2025);
+  expect(runtimeConfig.supportedTaxYears).toHaveLength(1);
+  expect(runtimeConfig.supportedTaxYears[0].taxYear).toBe(2025);
+  expect(runtimeConfig.supportedTaxYears[0].available).toBe(true);
+});
+
 test("unsupported return shows a blocking issue before compute", async ({ page }) => {
   await openApp(page);
   await fillStep1Single(page);
@@ -284,6 +304,129 @@ test("draft 1040 preview renders printable mock results", async ({ page }) => {
   await expect(page.locator("#draftSections")).toContainText("Estimated refund");
 });
 
+test("audit trail export captures sanitized input, review status, and computed output", async ({ page }) => {
+  await openApp(page);
+  await fillStep1Single(page);
+  await addSupportedW2(page);
+
+  await waitForReadyReview(page);
+  await page.locator("#computeBtn").click();
+  await expect(page.locator("#step3")).toHaveClass(/active/);
+  await expect(page.locator("#exportAuditBtn")).toBeEnabled();
+
+  const auditTrail = await page.evaluate(() => {
+    if (!window.__taxvaultTesting) {
+      return null;
+    }
+
+    return window.__taxvaultTesting.exportCurrentAuditTrail();
+  });
+  expect(auditTrail).not.toBeNull();
+  expect(auditTrail.type).toBe("taxvault-audit-trail");
+  expect(auditTrail.version).toBe(1);
+  expect(auditTrail.taxYear).toBe(2025);
+  expect(auditTrail.draftEnvelope.type).toBe("taxvault-draft");
+  expect(auditTrail.draftEnvelope.piiRedacted).toBe(true);
+  expect(auditTrail.supportReview.status).toBe("ready");
+  expect(auditTrail.supportReview.readyForEstimate).toBe(true);
+  expect(auditTrail.estimate.form.formId).toBe("1040");
+  expect(auditTrail.estimate.form.taxYear).toBe(2025);
+  expect(auditTrail.estimate.form.lines["1a"]).toBeDefined();
+  expect(
+    auditTrail.estimate.breakdown.some(
+      (row) => row.label === "Total Wages" && row.formattedValue === "$60,000.00"
+    )
+  ).toBe(true);
+  expect(auditTrail.estimate.trace.length).toBeGreaterThan(0);
+
+  const auditRaw = JSON.stringify(auditTrail);
+  expect(auditRaw).not.toContain("400-01-0001");
+  expect(auditRaw).not.toContain("12-3456789");
+});
+
+test("review packet export renders a readable redacted HTML packet", async ({ page }) => {
+  await openApp(page);
+  await fillStep1Single(page);
+  await addSupportedW2(page);
+
+  await waitForReadyReview(page);
+  await page.locator("#computeBtn").click();
+  await expect(page.locator("#step3")).toHaveClass(/active/);
+  await expect(page.locator("#exportReviewPacketBtn")).toBeEnabled();
+
+  const reviewPacketHtml = await page.evaluate(() => {
+    if (!window.__taxvaultTesting) {
+      return null;
+    }
+
+    return window.__taxvaultTesting.exportCurrentReviewPacketHtml();
+  });
+  expect(reviewPacketHtml).not.toBeNull();
+  expect(reviewPacketHtml).toContain("TaxVault Review Packet");
+  expect(reviewPacketHtml).toContain("Estimated Federal Refund");
+  expect(reviewPacketHtml).toContain("Alex Filer");
+  expect(reviewPacketHtml).toContain("Northwind Co");
+  expect(reviewPacketHtml).toContain("Calculation Trace");
+  expect(reviewPacketHtml).toContain("Draft Form 1040 Lines");
+  expect(reviewPacketHtml).not.toContain("400-01-0001");
+  expect(reviewPacketHtml).not.toContain("12-3456789");
+});
+
+test("draft export and import round-trip through the versioned envelope", async ({ page }) => {
+  await openApp(page);
+  await fillStep1Single(page);
+  await addSupportedW2(page);
+
+  await expect(page.locator("#exportDraftBtn")).toHaveCount(1);
+  const exportedDraft = await page.evaluate(() => {
+    if (!window.__taxvaultTesting) {
+      return null;
+    }
+
+    return window.__taxvaultTesting.exportCurrentDraftEnvelope();
+  });
+  expect(exportedDraft).not.toBeNull();
+  const exportedRaw = JSON.stringify(exportedDraft);
+  expect(exportedDraft.type).toBe("taxvault-draft");
+  expect(exportedDraft.version).toBe(2);
+  expect(exportedDraft.taxYear).toBe(2025);
+  expect(exportedDraft.piiRedacted).toBe(true);
+  expect(exportedDraft.draft.primaryFiler.firstName).toBe("Alex");
+  expect(exportedRaw).not.toContain("400-01-0001");
+  expect(exportedRaw).not.toContain("12-3456789");
+
+  await page.evaluate(() => {
+    window.localStorage.clear();
+    window.sessionStorage.clear();
+  });
+  await page.reload();
+  await expect(page.locator("#loading")).toHaveClass(/hidden/);
+
+  await page.locator("#gateAcknowledge").check();
+  await expect(page.locator("#gateContinueBtn")).toBeEnabled();
+  await page.locator("#gateContinueBtn").click();
+  await expect(page.locator("#app")).not.toHaveClass(/hidden/);
+
+  await page.locator("#importDraftInput").setInputFiles({
+    name: "taxvault-export.json",
+    mimeType: "application/json",
+    buffer: Buffer.from(exportedRaw),
+  });
+
+  await expect(page.locator("#pFirst")).toHaveValue("Alex");
+  await expect(page.locator("#pSsn")).toHaveValue("");
+  await expect(page.locator("#w2-1-employer")).toHaveValue("Northwind Co");
+  await expect(page.locator("#w2-1-ein")).toHaveValue("");
+  await expect(page.locator("#storageStatus")).toContainText("Draft imported.");
+
+  const storedSnapshot = await page.evaluate(() => window.sessionStorage.getItem("taxvault:draft:session:2025"));
+  expect(storedSnapshot).not.toBeNull();
+  const storedDraft = JSON.parse(storedSnapshot);
+  expect(storedDraft.type).toBe("taxvault-draft");
+  expect(storedDraft.version).toBe(2);
+  expect(storedDraft.taxYear).toBe(2025);
+});
+
 test("legacy saved draft restores without SSNs or EINs", async ({ page }) => {
   await waitForAppToLoad(page);
   await page.evaluate((snapshot) => {
@@ -303,6 +446,10 @@ test("legacy saved draft restores without SSNs or EINs", async ({ page }) => {
 
   const storedSnapshot = await page.evaluate(() => window.localStorage.getItem("taxvault:draft:local:2025"));
   expect(storedSnapshot).not.toBeNull();
+  const storedDraft = JSON.parse(storedSnapshot);
+  expect(storedDraft.type).toBe("taxvault-draft");
+  expect(storedDraft.version).toBe(2);
+  expect(storedDraft.taxYear).toBe(2025);
   expect(storedSnapshot).not.toContain("400-01-0001");
   expect(storedSnapshot).not.toContain("12-3456789");
   expect(storedSnapshot).toContain("Northwind Co");

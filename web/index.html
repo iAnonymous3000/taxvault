@@ -15,7 +15,7 @@
 
 <header class="header">
   <div class="header-inner">
-    <div class="header-eyebrow">Private 2025 Federal Estimate</div>
+    <div class="header-eyebrow">Private Federal Estimate</div>
     <h1>TaxVault</h1>
     <p>
       Get a quick federal tax estimate without sending your tax details through a cloud filing
@@ -62,9 +62,9 @@
         <div class="notice-eyebrow">Required Acknowledgment</div>
         <h2 class="gate-title" id="gateTitle">Use TaxVault for a private estimate, not for filing.</h2>
         <p class="gate-copy" id="gateBody">
-          TaxVault is best for a narrow set of 2025 federal estimates when you already have your
-          W-2 or supported 1099 forms in front of you. It does not prepare a filing-ready return,
-          and unsupported forms can make the result wrong.
+          TaxVault is best for a narrow set of federal estimates when you already have your W-2 or
+          supported 1099 forms in front of you. It does not prepare a filing-ready return, and
+          unsupported forms can make the result wrong.
         </p>
       </div>
       <aside class="gate-side-note" aria-label="Privacy summary">
@@ -228,6 +228,19 @@
             <input id="rememberDraftToggle" type="checkbox">
             <span>Remember this draft on this device</span>
           </label>
+          <button class="btn btn-secondary btn-small" id="exportDraftBtn" type="button">
+            Export Draft
+          </button>
+          <button class="btn btn-secondary btn-small" id="importDraftBtn" type="button">
+            Import Draft
+          </button>
+          <input
+            id="importDraftInput"
+            class="sr-only"
+            type="file"
+            accept=".json,application/json"
+            aria-label="Import TaxVault draft file"
+          >
           <button class="btn btn-secondary btn-small" id="clearAllBtn" type="button">
             Clear All Data
           </button>
@@ -263,6 +276,22 @@
           Choose the filing status you usually use, then enter the people on the return. SSN fields
           stay hidden by default, and dates of birth help TaxVault apply age-based deduction rules.
         </p>
+      </div>
+
+      <div class="card">
+        <h2 class="card-title" id="taxYearTitle">Estimate Year</h2>
+        <p class="card-subtitle">
+          TaxVault keeps drafts, exports, and rule packs separated by federal tax year.
+        </p>
+        <div class="row">
+          <div class="field">
+            <label for="taxYearSelect">Federal Tax Year</label>
+            <select id="taxYearSelect" aria-labelledby="taxYearTitle"></select>
+            <div class="field-hint" id="taxYearHint">
+              Loading the embedded tax-year configuration for this build.
+            </div>
+          </div>
+        </div>
       </div>
 
       <div class="card">
@@ -721,7 +750,8 @@
         <div class="section-intro-step">Step 3 of 3</div>
         <h2 class="section-intro-title">Your Estimate</h2>
         <p class="section-intro-copy">
-          Print a PDF copy from your browser, or clear the page when you are done.
+          Print a PDF copy from your browser, export a review packet or audit trail, or clear the
+          page when you are done.
         </p>
       </div>
 
@@ -747,6 +777,12 @@
             </p>
           </div>
           <div class="draft-actions">
+            <button class="btn btn-secondary" id="exportReviewPacketBtn" type="button" disabled>
+              Export Review Packet
+            </button>
+            <button class="btn btn-secondary" id="exportAuditBtn" type="button" disabled>
+              Export Audit Trail
+            </button>
             <button class="btn btn-primary" id="printDraftBtn" type="button" disabled>
               Print / Save PDF
             </button>

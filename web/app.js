@@ -1,4 +1,4 @@
-import init, { compute_tax, review_tax_input } from "./pkg/taxvault_wasm.js";
+import init, { compute_tax, get_app_config, review_tax_input } from "./pkg/taxvault_wasm.js";
 
 const SSN_PATTERN = /^\d{3}-\d{2}-\d{4}$/;
 const EIN_PATTERN = /^\d{2}-\d{7}$/;
@@ -17,11 +17,14 @@ const draftTimestampFormatter = new Intl.DateTimeFormat("en-US", {
 });
 const SUPPORT_REVIEW_DEFAULT_SUMMARY =
   "Start with the forms you actually have. TaxVault will tell you whether this draft fits the supported estimate scope.";
-const SUPPORTED_TAX_YEAR = 2025;
-const DRAFT_STORAGE_VERSION = 1;
-const SESSION_DRAFT_STORAGE_KEY = `taxvault:draft:session:${SUPPORTED_TAX_YEAR}`;
-const LOCAL_DRAFT_STORAGE_KEY = `taxvault:draft:local:${SUPPORTED_TAX_YEAR}`;
-const LOCAL_DRAFT_PREFERENCE_KEY = `taxvault:draft:remember:${SUPPORTED_TAX_YEAR}`;
+const APP_VERSION = "0.1.0";
+const DEFAULT_TAX_YEAR = 2025;
+const LEGACY_DRAFT_STORAGE_VERSION = 1;
+const DRAFT_ENVELOPE_VERSION = 2;
+const DRAFT_FILE_TYPE = "taxvault-draft";
+const AUDIT_TRAIL_VERSION = 1;
+const AUDIT_TRAIL_FILE_TYPE = "taxvault-audit-trail";
+const ACTIVE_TAX_YEAR_STORAGE_KEY = "taxvault:active-tax-year";
 const MAX_W2_FORMS = 25;
 const MAX_INTEREST_FORMS = 25;
 const MAX_SOCIAL_SECURITY_FORMS = 10;
@@ -118,7 +121,15 @@ const state = {
   interestCount: 0,
   dividendCount: 0,
   dependentCount: 0,
+  defaultTaxYear: DEFAULT_TAX_YEAR,
+  selectedTaxYear: DEFAULT_TAX_YEAR,
+  supportedTaxYears: [],
   filingStatus: "single",
+  draftEnvelopeCreatedAt: null,
+  lastSupportReview: null,
+  lastComputedResult: null,
+  lastComputedDraftEnvelope: null,
+  lastComputedSupportReview: null,
 };
 
 const els = {
@@ -130,12 +141,17 @@ const els = {
   mainContent: document.getElementById("mainContent"),
   app: document.getElementById("app"),
   error: document.getElementById("error"),
+  taxYearSelect: document.getElementById("taxYearSelect"),
+  taxYearHint: document.getElementById("taxYearHint"),
   spouseCard: document.getElementById("spouseCard"),
   dependentSection: document.getElementById("dependentSection"),
   dependentSubtitle: document.getElementById("dependentSubtitle"),
   dependentContainer: document.getElementById("dependentContainer"),
   addDependentBtn: document.getElementById("addDependentBtn"),
   clearAllBtn: document.getElementById("clearAllBtn"),
+  exportDraftBtn: document.getElementById("exportDraftBtn"),
+  importDraftBtn: document.getElementById("importDraftBtn"),
+  importDraftInput: document.getElementById("importDraftInput"),
   rememberDraftToggle: document.getElementById("rememberDraftToggle"),
   storageStatus: document.getElementById("storageStatus"),
   storageTrustCopy: document.getElementById("storageTrustCopy"),
@@ -161,7 +177,9 @@ const els = {
   supportReviewIssues: document.getElementById("supportReviewIssues"),
   supportReviewCautionsSection: document.getElementById("supportReviewCautionsSection"),
   supportReviewCautions: document.getElementById("supportReviewCautions"),
+  exportReviewPacketBtn: document.getElementById("exportReviewPacketBtn"),
   printDraftBtn: document.getElementById("printDraftBtn"),
+  exportAuditBtn: document.getElementById("exportAuditBtn"),
   draftSummaryGrid: document.getElementById("draftSummaryGrid"),
   draftSections: document.getElementById("draftSections"),
   linesToggle: document.getElementById("linesToggle"),
@@ -182,6 +200,7 @@ start();
 async function start() {
   try {
     await init();
+    applyRuntimeConfig(loadRuntimeConfig());
     state.wasmReady = true;
     restoreDraftPreference();
     restoreDraftSnapshot();
@@ -204,6 +223,7 @@ function bindStaticEvents() {
   document.getElementById("step1ContinueBtn").addEventListener("click", () => goToStep(2));
   document.getElementById("step2BackBtn").addEventListener("click", () => goToStep(1));
   document.getElementById("editReturnBtn").addEventListener("click", () => goToStep(1));
+  els.taxYearSelect?.addEventListener("change", handleTaxYearSelectionChange);
   els.gateAcknowledge.addEventListener("change", updateGateButtonState);
   els.gateContinueBtn.addEventListener("click", acknowledgeSafetyGate);
   els.addW2Btn.addEventListener("click", addW2);
@@ -212,9 +232,14 @@ function bindStaticEvents() {
   els.addDividendBtn.addEventListener("click", addDividend);
   els.addDependentBtn.addEventListener("click", addDependent);
   els.clearAllBtn.addEventListener("click", clearAllData);
+  els.exportDraftBtn?.addEventListener("click", exportDraftToFile);
+  els.importDraftBtn?.addEventListener("click", openDraftImportPicker);
+  els.importDraftInput?.addEventListener("change", handleImportDraftFileSelection);
   els.rememberDraftToggle.addEventListener("change", handleRememberDraftToggle);
   els.computeBtn.addEventListener("click", computeReturn);
+  els.exportReviewPacketBtn?.addEventListener("click", exportReviewPacketToFile);
   els.printDraftBtn.addEventListener("click", printDraftReturn);
+  els.exportAuditBtn?.addEventListener("click", exportAuditTrailToFile);
   els.linesToggle.addEventListener("click", toggleLines);
   els.traceToggle.addEventListener("click", toggleTrace);
   els.app.addEventListener("input", handleAppFieldMutation);
@@ -227,6 +252,7 @@ function bindStaticEvents() {
   updateDependentSubtitle(false);
   resetSupportReview();
   resetDraftPreview();
+  syncAuditExportButton();
   refreshStorageStatus();
   renderIncomeSummaryChips();
   syncComputeButtonState();
@@ -356,6 +382,175 @@ function normalizeMoneyField(input) {
   }
 }
 
+function currentTaxYear() {
+  return Number.isInteger(state.selectedTaxYear) ? state.selectedTaxYear : state.defaultTaxYear;
+}
+
+function supportedTaxYearEntries() {
+  return state.supportedTaxYears;
+}
+
+function isSupportedTaxYear(taxYear) {
+  return supportedTaxYearEntries().some((entry) => entry.taxYear === Number(taxYear));
+}
+
+function normalizeTaxYear(taxYear) {
+  const candidate = Number(taxYear);
+  if (isSupportedTaxYear(candidate)) {
+    return candidate;
+  }
+
+  return state.defaultTaxYear || DEFAULT_TAX_YEAR;
+}
+
+function draftSessionStorageKey(taxYear = currentTaxYear()) {
+  return `taxvault:draft:session:${taxYear}`;
+}
+
+function draftLocalStorageKey(taxYear = currentTaxYear()) {
+  return `taxvault:draft:local:${taxYear}`;
+}
+
+function draftPreferenceStorageKey(taxYear = currentTaxYear()) {
+  return `taxvault:draft:remember:${taxYear}`;
+}
+
+function readStoredActiveTaxYear() {
+  return Number(readStoredValue(storageFor("session"), ACTIVE_TAX_YEAR_STORAGE_KEY));
+}
+
+function writeStoredActiveTaxYear(taxYear) {
+  writeStoredValue(storageFor("session"), ACTIVE_TAX_YEAR_STORAGE_KEY, String(taxYear));
+}
+
+function normalizeRuntimeConfig(rawConfig) {
+  const entries = Array.isArray(rawConfig?.supported_tax_years)
+    ? rawConfig.supported_tax_years
+        .map((entry) => {
+          const taxYear = Number(entry?.tax_year);
+          if (!Number.isInteger(taxYear)) {
+            return null;
+          }
+
+          return {
+            taxYear,
+            available: Boolean(entry?.available),
+            rulePackVersion:
+              typeof entry?.rule_pack_version === "string" ? entry.rule_pack_version : null,
+            taxTableVerificationStatus:
+              typeof entry?.tax_table_verification_status === "string"
+                ? entry.tax_table_verification_status
+                : null,
+            taxTableLocalEstimateReady: Boolean(entry?.tax_table_local_estimate_ready),
+            taxTableHumanVerified: Boolean(entry?.tax_table_human_verified),
+            loadError: typeof entry?.load_error === "string" ? entry.load_error : null,
+          };
+        })
+        .filter(Boolean)
+        .sort((left, right) => right.taxYear - left.taxYear)
+    : [];
+
+  const availableEntries = entries.filter((entry) => entry.available);
+  const defaultTaxYear = Number(rawConfig?.default_tax_year);
+  const fallbackTaxYear =
+    availableEntries[0]?.taxYear || entries[0]?.taxYear || DEFAULT_TAX_YEAR;
+
+  return {
+    defaultTaxYear:
+      Number.isInteger(defaultTaxYear) && availableEntries.some((entry) => entry.taxYear === defaultTaxYear)
+        ? defaultTaxYear
+        : fallbackTaxYear,
+    supportedTaxYears:
+      entries.length > 0
+        ? entries
+        : [
+            {
+              taxYear: DEFAULT_TAX_YEAR,
+              available: true,
+              rulePackVersion: null,
+              taxTableVerificationStatus: null,
+              taxTableLocalEstimateReady: false,
+              taxTableHumanVerified: false,
+              loadError: null,
+            },
+          ],
+  };
+}
+
+function loadRuntimeConfig() {
+  try {
+    return normalizeRuntimeConfig(JSON.parse(get_app_config()));
+  } catch {
+    return normalizeRuntimeConfig(null);
+  }
+}
+
+function applyRuntimeConfig(config) {
+  state.supportedTaxYears = config.supportedTaxYears;
+  state.defaultTaxYear = config.defaultTaxYear;
+
+  const storedActiveTaxYear = readStoredActiveTaxYear();
+  state.selectedTaxYear = normalizeTaxYear(
+    Number.isInteger(storedActiveTaxYear) ? storedActiveTaxYear : config.defaultTaxYear
+  );
+  writeStoredActiveTaxYear(state.selectedTaxYear);
+  renderTaxYearSelector();
+}
+
+function renderTaxYearSelector() {
+  if (!els.taxYearSelect) {
+    return;
+  }
+
+  const supportedEntries = supportedTaxYearEntries();
+  els.taxYearSelect.replaceChildren();
+
+  supportedEntries.forEach((entry) => {
+    const option = new Option(String(entry.taxYear), String(entry.taxYear));
+    option.selected = entry.taxYear === currentTaxYear();
+    option.disabled = !entry.available;
+    els.taxYearSelect.add(option);
+  });
+
+  const availableCount = supportedEntries.filter((entry) => entry.available).length;
+  els.taxYearSelect.disabled = availableCount <= 1;
+
+  if (!els.taxYearHint) {
+    return;
+  }
+
+  if (availableCount <= 1) {
+    els.taxYearHint.textContent =
+      "This build includes one embedded federal rule pack, but drafts and exports already stay keyed to that tax year.";
+    return;
+  }
+
+  els.taxYearHint.textContent =
+    "Switching years opens that year's separate local draft and reloads the page into the matching rule pack.";
+}
+
+function handleTaxYearSelectionChange(event) {
+  const nextTaxYear = normalizeTaxYear(event.target.value);
+  if (nextTaxYear === currentTaxYear()) {
+    renderTaxYearSelector();
+    return;
+  }
+
+  const hasDraftData = Boolean(buildStoredDraftEnvelope(captureDraftSnapshot())) || state.currentStep === 3;
+  if (
+    hasDraftData &&
+    !window.confirm(
+      `Switch to tax year ${nextTaxYear}? TaxVault keeps a separate local draft for each supported year and will reload this page into that year.`
+    )
+  ) {
+    renderTaxYearSelector();
+    return;
+  }
+
+  writeStoredActiveTaxYear(nextTaxYear);
+  window.location.reload();
+}
+
 function storageFor(kind) {
   if (typeof window === "undefined") {
     return null;
@@ -427,7 +622,7 @@ function restoreDraftPreference() {
   }
 
   els.rememberDraftToggle.checked =
-    readStoredValue(localStorageRef, LOCAL_DRAFT_PREFERENCE_KEY) === "true";
+    readStoredValue(localStorageRef, draftPreferenceStorageKey()) === "true";
   refreshStorageStatus();
 }
 
@@ -435,15 +630,15 @@ function handleRememberDraftToggle() {
   const localStorageRef = storageFor("local");
 
   if (rememberDraftEnabled()) {
-    writeStoredValue(localStorageRef, LOCAL_DRAFT_PREFERENCE_KEY, "true");
+    writeStoredValue(localStorageRef, draftPreferenceStorageKey(), "true");
     persistDraftSnapshot();
     refreshStorageStatus("Draft will also stay on this device until you clear it.");
     announceUiStatus("Draft persistence enabled for this device.");
     return;
   }
 
-  removeStoredValue(localStorageRef, LOCAL_DRAFT_PREFERENCE_KEY);
-  removeStoredValue(localStorageRef, LOCAL_DRAFT_STORAGE_KEY);
+  removeStoredValue(localStorageRef, draftPreferenceStorageKey());
+  removeStoredValue(localStorageRef, draftLocalStorageKey());
   persistDraftSnapshot();
   refreshStorageStatus("Draft will clear when this tab closes unless you enable device storage again.");
   announceUiStatus("Device draft persistence disabled.");
@@ -461,8 +656,8 @@ function refreshStorageStatus(message = "") {
   }
 
   els.storageStatus.textContent = rememberDraftEnabled()
-    ? "Draft autosaves in this tab and stays on this device until you clear it."
-    : "Draft autosaves in this tab and clears when the tab closes.";
+    ? `Tax year ${currentTaxYear()} draft autosaves in this tab and stays on this device until you clear it.`
+    : `Tax year ${currentTaxYear()} draft autosaves in this tab and clears when the tab closes.`;
   updateStorageTrustCopy();
 }
 
@@ -479,8 +674,8 @@ function updateStorageTrustCopy() {
   }
 
   els.storageTrustCopy.textContent = rememberDraftEnabled()
-    ? "Your draft autosaves in this tab and stays on this device until you clear it."
-    : "By default your draft autosaves only in this tab and clears when the tab closes.";
+    ? `Your tax year ${currentTaxYear()} draft autosaves in this tab and stays on this device until you clear it.`
+    : `By default your tax year ${currentTaxYear()} draft autosaves only in this tab and clears when the tab closes.`;
 }
 
 function renderIncomeSummaryChips() {
@@ -620,9 +815,12 @@ function snapshotHasUserData(snapshot) {
   );
 }
 
+function isPlainObject(value) {
+  return Boolean(value) && typeof value === "object" && !Array.isArray(value);
+}
+
 function captureDraftSnapshot() {
   return {
-    version: DRAFT_STORAGE_VERSION,
     savedAt: new Date().toISOString(),
     filingStatus: state.filingStatus,
     currentStep: Math.min(state.currentStep, 2),
@@ -720,35 +918,106 @@ function stripPiiFromSnapshot(snapshot) {
   };
 }
 
-function storeDraftSnapshot(snapshot, { refreshStatus = true } = {}) {
-  const sessionStorageRef = storageFor("session");
-  const localStorageRef = storageFor("local");
+function buildDraftEnvelope(snapshot, { createdAt, updatedAt, piiRedacted = true, taxYear } = {}) {
+  const normalizedUpdatedAt =
+    typeof updatedAt === "string" && updatedAt ? updatedAt : new Date().toISOString();
+  const normalizedCreatedAt =
+    typeof createdAt === "string" && createdAt ? createdAt : normalizedUpdatedAt;
+  const normalizedTaxYear = normalizeTaxYear(taxYear ?? currentTaxYear());
+
+  return {
+    type: DRAFT_FILE_TYPE,
+    version: DRAFT_ENVELOPE_VERSION,
+    appVersion: APP_VERSION,
+    taxYear: normalizedTaxYear,
+    piiRedacted: Boolean(piiRedacted),
+    createdAt: normalizedCreatedAt,
+    updatedAt: normalizedUpdatedAt,
+    draft: {
+      ...snapshot,
+      savedAt: normalizedUpdatedAt,
+    },
+  };
+}
+
+function looksLikeDraftEnvelope(value) {
+  return isPlainObject(value) && value.type === DRAFT_FILE_TYPE;
+}
+
+function looksLikeLegacyDraftSnapshot(value) {
+  return isPlainObject(value) && value.version === LEGACY_DRAFT_STORAGE_VERSION;
+}
+
+function buildStoredDraftEnvelope(snapshot, { createdAt, taxYear } = {}) {
   const sanitizedSnapshot = stripPiiFromSnapshot(snapshot);
 
   if (!snapshotHasUserData(sanitizedSnapshot)) {
-    removeStoredValue(sessionStorageRef, SESSION_DRAFT_STORAGE_KEY);
-    removeStoredValue(localStorageRef, LOCAL_DRAFT_STORAGE_KEY);
-    if (refreshStatus) {
-      refreshStorageStatus();
-    }
     return null;
   }
 
-  const serialized = JSON.stringify(sanitizedSnapshot);
-  writeStoredValue(sessionStorageRef, SESSION_DRAFT_STORAGE_KEY, serialized);
+  const updatedAt =
+    typeof sanitizedSnapshot.savedAt === "string" && sanitizedSnapshot.savedAt
+      ? sanitizedSnapshot.savedAt
+      : new Date().toISOString();
+  const envelopeCreatedAt =
+    typeof createdAt === "string" && createdAt
+      ? createdAt
+      : state.draftEnvelopeCreatedAt || updatedAt;
+
+  return buildDraftEnvelope(sanitizedSnapshot, {
+    createdAt: envelopeCreatedAt,
+    updatedAt,
+    piiRedacted: true,
+    taxYear,
+  });
+}
+
+function clearStoredDraftData({ refreshStatus = true, taxYear = currentTaxYear() } = {}) {
+  const sessionStorageRef = storageFor("session");
+  const localStorageRef = storageFor("local");
+  removeStoredValue(sessionStorageRef, draftSessionStorageKey(taxYear));
+  removeStoredValue(localStorageRef, draftLocalStorageKey(taxYear));
+  state.draftEnvelopeCreatedAt = null;
+
+  if (refreshStatus) {
+    refreshStorageStatus();
+  }
+}
+
+function storeDraftEnvelope(envelope, { refreshStatus = true } = {}) {
+  const sessionStorageRef = storageFor("session");
+  const localStorageRef = storageFor("local");
+  const serialized = JSON.stringify(envelope);
+  const taxYear = normalizeTaxYear(envelope?.taxYear);
+
+  writeStoredValue(sessionStorageRef, draftSessionStorageKey(taxYear), serialized);
 
   if (rememberDraftEnabled()) {
-    writeStoredValue(localStorageRef, LOCAL_DRAFT_PREFERENCE_KEY, "true");
-    writeStoredValue(localStorageRef, LOCAL_DRAFT_STORAGE_KEY, serialized);
+    writeStoredValue(localStorageRef, draftPreferenceStorageKey(taxYear), "true");
+    writeStoredValue(localStorageRef, draftLocalStorageKey(taxYear), serialized);
   } else {
-    removeStoredValue(localStorageRef, LOCAL_DRAFT_STORAGE_KEY);
+    removeStoredValue(localStorageRef, draftLocalStorageKey(taxYear));
   }
+
+  state.draftEnvelopeCreatedAt =
+    typeof envelope.createdAt === "string" && envelope.createdAt ? envelope.createdAt : null;
 
   if (refreshStatus) {
     refreshStorageStatus();
   }
 
-  return sanitizedSnapshot;
+  return envelope;
+}
+
+function storeDraftSnapshot(snapshot, { refreshStatus = true, createdAt, taxYear } = {}) {
+  const envelope = buildStoredDraftEnvelope(snapshot, { createdAt, taxYear });
+
+  if (!envelope) {
+    clearStoredDraftData({ refreshStatus });
+    return null;
+  }
+
+  return storeDraftEnvelope(envelope, { refreshStatus });
 }
 
 function persistDraftSnapshot() {
@@ -785,11 +1054,7 @@ function normalizeDraftStep(value) {
 }
 
 function sanitizeDraftSnapshotForRestore(snapshot) {
-  if (!snapshot || typeof snapshot !== "object" || Array.isArray(snapshot)) {
-    return null;
-  }
-
-  if (snapshot.version !== DRAFT_STORAGE_VERSION) {
+  if (!isPlainObject(snapshot)) {
     return null;
   }
 
@@ -905,7 +1170,7 @@ function sanitizeDraftSnapshotForRestore(snapshot) {
         return {
           employerName: truncateDraftField(w2.employerName, MAX_TEXT_FIELD_LENGTH),
           recipient: normalizeIncomeRecipient(w2.recipient),
-          employerEin: truncateDraftField(w2.employerEin, 12),
+          employerEin: "",
           federalTaxWithheld: truncateDraftField(w2.federalTaxWithheld, 32),
           wages: truncateDraftField(w2.wages, 32),
           stateTaxWithheld: truncateDraftField(w2.stateTaxWithheld, 32),
@@ -977,7 +1242,6 @@ function sanitizeDraftSnapshotForRestore(snapshot) {
     : [];
 
   return {
-    version: DRAFT_STORAGE_VERSION,
     savedAt,
     filingStatus,
     currentStep,
@@ -993,46 +1257,145 @@ function sanitizeDraftSnapshotForRestore(snapshot) {
   };
 }
 
+function prepareDraftEnvelopeForRestore(rawDraft) {
+  if (looksLikeDraftEnvelope(rawDraft)) {
+    if (rawDraft.version !== DRAFT_ENVELOPE_VERSION) {
+      return {
+        ok: false,
+        message: `This draft uses TaxVault draft format v${rawDraft.version}. This build supports v${DRAFT_ENVELOPE_VERSION}.`,
+      };
+    }
+
+    const draftTaxYear = Number(rawDraft.taxYear);
+    if (!Number.isInteger(draftTaxYear) || !isSupportedTaxYear(draftTaxYear)) {
+      const availableYears = supportedTaxYearEntries().map((entry) => entry.taxYear).join(", ");
+      return {
+        ok: false,
+        message: `This draft is for tax year ${rawDraft.taxYear}. This TaxVault build currently supports: ${availableYears || "no embedded tax years"}.`,
+      };
+    }
+
+    const sanitizedSnapshot = sanitizeDraftSnapshotForRestore(rawDraft.draft);
+    if (!sanitizedSnapshot || !snapshotHasUserData(sanitizedSnapshot)) {
+      return {
+        ok: false,
+        message: "This TaxVault draft file did not include any restorable draft data.",
+      };
+    }
+
+    return {
+      ok: true,
+      migratedLegacy: false,
+      envelope: buildDraftEnvelope(sanitizedSnapshot, {
+        createdAt:
+          typeof rawDraft.createdAt === "string" && rawDraft.createdAt
+            ? rawDraft.createdAt
+            : sanitizedSnapshot.savedAt,
+        updatedAt:
+          typeof rawDraft.updatedAt === "string" && rawDraft.updatedAt
+            ? rawDraft.updatedAt
+            : sanitizedSnapshot.savedAt,
+        piiRedacted: true,
+        taxYear: draftTaxYear,
+      }),
+    };
+  }
+
+  if (looksLikeLegacyDraftSnapshot(rawDraft)) {
+    const sanitizedSnapshot = sanitizeDraftSnapshotForRestore(rawDraft);
+    if (!sanitizedSnapshot || !snapshotHasUserData(sanitizedSnapshot)) {
+      return {
+        ok: false,
+        message: "This legacy TaxVault draft did not include any restorable draft data.",
+      };
+    }
+
+    return {
+      ok: true,
+      migratedLegacy: true,
+      envelope: buildDraftEnvelope(sanitizedSnapshot, {
+        createdAt: sanitizedSnapshot.savedAt,
+        updatedAt: sanitizedSnapshot.savedAt,
+        piiRedacted: true,
+        taxYear: currentTaxYear(),
+      }),
+    };
+  }
+
+  return {
+    ok: false,
+    message: "This file is not a supported TaxVault draft export.",
+  };
+}
+
+function draftRestoreMessage(hadResults, action = "restored") {
+  const prefix = action === "imported" ? "Draft imported." : "Draft restored.";
+  return hadResults
+    ? `${prefix} SSNs and EINs must be re-entered (not stored for your protection). Recalculate to refresh the estimate results.`
+    : `${prefix} SSNs and EINs must be re-entered (not stored for your protection).`;
+}
+
+function importDraftValue(rawDraft, { announce = true } = {}) {
+  const prepared = prepareDraftEnvelopeForRestore(rawDraft);
+  if (!prepared.ok) {
+    return prepared;
+  }
+
+  const importedTaxYear = normalizeTaxYear(prepared.envelope.taxYear);
+  if (importedTaxYear !== currentTaxYear()) {
+    state.selectedTaxYear = importedTaxYear;
+    writeStoredActiveTaxYear(importedTaxYear);
+    restoreDraftPreference();
+    renderTaxYearSelector();
+  }
+
+  const storedEnvelope = storeDraftEnvelope(prepared.envelope, { refreshStatus: false });
+  applyDraftSnapshot(storedEnvelope.draft);
+
+  const restoredMessage = draftRestoreMessage(storedEnvelope.draft.hadResults, "imported");
+  refreshStorageStatus(restoredMessage);
+  hideError();
+
+  if (announce) {
+    announceUiStatus("Draft imported.");
+  }
+
+  return {
+    ok: true,
+    migratedLegacy: prepared.migratedLegacy,
+    envelope: storedEnvelope,
+    message: restoredMessage,
+  };
+}
+
 function restoreDraftSnapshot() {
   const localStorageRef = storageFor("local");
   const sessionStorageRef = storageFor("session");
-  const rawSnapshot =
-    (rememberDraftEnabled() && readStoredValue(localStorageRef, LOCAL_DRAFT_STORAGE_KEY)) ||
-    readStoredValue(sessionStorageRef, SESSION_DRAFT_STORAGE_KEY);
+  const rawDraft =
+    (rememberDraftEnabled() && readStoredValue(localStorageRef, draftLocalStorageKey())) ||
+    readStoredValue(sessionStorageRef, draftSessionStorageKey());
 
-  if (!rawSnapshot) {
+  if (!rawDraft) {
     return false;
   }
 
-  let snapshot;
+  let parsedDraft;
   try {
-    snapshot = JSON.parse(rawSnapshot);
+    parsedDraft = JSON.parse(rawDraft);
   } catch {
-    removeStoredValue(sessionStorageRef, SESSION_DRAFT_STORAGE_KEY);
-    removeStoredValue(localStorageRef, LOCAL_DRAFT_STORAGE_KEY);
-    refreshStorageStatus();
+    clearStoredDraftData({ refreshStatus: true });
     return false;
   }
 
-  const sanitizedSnapshot = sanitizeDraftSnapshotForRestore(snapshot);
-  if (!sanitizedSnapshot) {
-    removeStoredValue(sessionStorageRef, SESSION_DRAFT_STORAGE_KEY);
-    removeStoredValue(localStorageRef, LOCAL_DRAFT_STORAGE_KEY);
-    refreshStorageStatus();
+  const prepared = prepareDraftEnvelopeForRestore(parsedDraft);
+  if (!prepared.ok) {
+    clearStoredDraftData({ refreshStatus: true });
     return false;
   }
 
-  const storedSnapshot = storeDraftSnapshot(sanitizedSnapshot, { refreshStatus: false });
-  if (!storedSnapshot) {
-    refreshStorageStatus();
-    return false;
-  }
-
-  applyDraftSnapshot(storedSnapshot);
-  const restoredMessage = storedSnapshot.hadResults
-    ? "Draft restored. SSNs and EINs must be re-entered (not stored for your protection). Recalculate to refresh the estimate results."
-    : "Draft restored. SSNs and EINs must be re-entered (not stored for your protection).";
-  refreshStorageStatus(restoredMessage);
+  const storedEnvelope = storeDraftEnvelope(prepared.envelope, { refreshStatus: false });
+  applyDraftSnapshot(storedEnvelope.draft);
+  refreshStorageStatus(draftRestoreMessage(storedEnvelope.draft.hadResults));
   announceUiStatus("Saved draft restored.");
   return true;
 }
@@ -1041,6 +1404,7 @@ function applyDraftSnapshot(snapshot) {
   draftRestoreInProgress = true;
 
   try {
+    resetComputedEstimate();
     selectStatus(snapshot.filingStatus || "single", { autoSeedDependent: false });
     applyFilerInputs("p", snapshot.primaryFiler);
     applyFilerInputs("s", snapshot.spouse);
@@ -1283,6 +1647,7 @@ function handleStatusOptionKeydown(event) {
 function selectStatus(status, { autoSeedDependent = true, focusSelected = false } = {}) {
   const normalized = normalizeFilingStatus(status);
   state.filingStatus = normalized;
+  resetComputedEstimate();
 
   document.querySelectorAll(".status-option").forEach((button) => {
     const selected = button.dataset.status === normalized;
@@ -1814,6 +2179,7 @@ function addW2({ focusNewCard = true } = {}) {
   els.w2Container.append(card);
   updateRemoveButtons();
   renderIncomeSummaryChips();
+  resetComputedEstimate();
   scheduleSupportReview();
   scheduleDraftSave();
   announceUiStatus(`Added W-2 #${els.w2Container.children.length}.`);
@@ -1867,6 +2233,7 @@ function addSocialSecurity({ focusNewCard = true } = {}) {
   els.socialSecurityContainer.append(card);
   updateSocialSecurityRemoveButtons();
   renderIncomeSummaryChips();
+  resetComputedEstimate();
   scheduleSupportReview();
   scheduleDraftSave();
   announceUiStatus(`Added SSA-1099 #${els.socialSecurityContainer.children.length}.`);
@@ -1931,6 +2298,7 @@ function addInterest({ focusNewCard = true } = {}) {
   els.interestContainer.append(card);
   updateInterestRemoveButtons();
   renderIncomeSummaryChips();
+  resetComputedEstimate();
   scheduleSupportReview();
   scheduleDraftSave();
   announceUiStatus(`Added 1099-INT #${els.interestContainer.children.length}.`);
@@ -1995,6 +2363,7 @@ function addDividend({ focusNewCard = true } = {}) {
   els.dividendContainer.append(card);
   updateDividendRemoveButtons();
   renderIncomeSummaryChips();
+  resetComputedEstimate();
   scheduleSupportReview();
   scheduleDraftSave();
   announceUiStatus(`Added 1099-DIV #${els.dividendContainer.children.length}.`);
@@ -2083,6 +2452,7 @@ function addDependent({ focusNewCard = true } = {}) {
 
   els.dependentContainer.append(card);
   updateDependentRemoveButtons();
+  resetComputedEstimate();
   scheduleDraftSave();
   announceUiStatus(`Added dependent #${els.dependentContainer.children.length}.`);
   if (focusNewCard) {
@@ -2098,6 +2468,7 @@ function removeW2(card) {
   card.remove();
   updateRemoveButtons();
   renderIncomeSummaryChips();
+  resetComputedEstimate();
   scheduleSupportReview();
   scheduleDraftSave();
   focusElement(focusTarget);
@@ -2110,6 +2481,7 @@ function removeInterest(card) {
   card.remove();
   updateInterestRemoveButtons();
   renderIncomeSummaryChips();
+  resetComputedEstimate();
   scheduleSupportReview();
   scheduleDraftSave();
   focusElement(focusTarget);
@@ -2122,6 +2494,7 @@ function removeSocialSecurity(card) {
   card.remove();
   updateSocialSecurityRemoveButtons();
   renderIncomeSummaryChips();
+  resetComputedEstimate();
   scheduleSupportReview();
   scheduleDraftSave();
   focusElement(focusTarget);
@@ -2134,6 +2507,7 @@ function removeDividend(card) {
   card.remove();
   updateDividendRemoveButtons();
   renderIncomeSummaryChips();
+  resetComputedEstimate();
   scheduleSupportReview();
   scheduleDraftSave();
   focusElement(focusTarget);
@@ -2144,6 +2518,7 @@ function removeDependent(card) {
   const focusTarget = nextFocusTargetAfterRemoval(card, els.addDependentBtn);
   card.remove();
   updateDependentRemoveButtons();
+  resetComputedEstimate();
   scheduleDraftSave();
   focusElement(focusTarget);
   announceUiStatus("Removed dependent.");
@@ -2225,6 +2600,10 @@ function toggleTrace() {
 function handleAppFieldMutation(event) {
   if (!(event.target instanceof HTMLElement)) {
     return;
+  }
+
+  if (event.target.closest("#step1, #step2")) {
+    resetComputedEstimate();
   }
 
   if (event.target.classList.contains("money-input")) {
@@ -2313,9 +2692,18 @@ function syncComputeButtonState() {
 }
 
 function renderSupportReviewPending(summary) {
+  const normalizedReview = normalizeSupportReviewSnapshot({
+    status: "pending",
+    readyForEstimate: false,
+    summary,
+    blockingIssues: [],
+    cautions: [],
+  });
+
   state.supportReviewReadyForEstimate = false;
+  state.lastSupportReview = normalizedReview;
   els.supportReviewCard.dataset.status = "pending";
-  els.supportReviewSummary.textContent = summary;
+  els.supportReviewSummary.textContent = normalizedReview.summary;
   els.supportReviewBadge.className = "support-review-badge pending";
   els.supportReviewBadge.textContent = "In Progress";
   setSupportReviewItems(els.supportReviewIssuesSection, els.supportReviewIssues, []);
@@ -2324,27 +2712,48 @@ function renderSupportReviewPending(summary) {
 }
 
 function renderSupportReview(review) {
-  const status = ["ready", "attention", "unsupported"].includes(review?.status)
-    ? review.status
-    : "attention";
-  state.supportReviewReadyForEstimate = Boolean(review?.ready_for_estimate) && status === "ready";
+  const normalizedReview = normalizeSupportReviewSnapshot(review);
+  const status = normalizedReview.status;
+
+  state.supportReviewReadyForEstimate = normalizedReview.readyForEstimate;
+  state.lastSupportReview = normalizedReview;
 
   els.supportReviewCard.dataset.status = status;
-  els.supportReviewSummary.textContent =
-    review?.summary || "TaxVault reviewed this draft, but the status message was unavailable.";
+  els.supportReviewSummary.textContent = normalizedReview.summary;
   els.supportReviewBadge.className = `support-review-badge ${status}`;
   els.supportReviewBadge.textContent = supportReviewBadgeLabel(status);
   setSupportReviewItems(
     els.supportReviewIssuesSection,
     els.supportReviewIssues,
-    dedupeMessages(coalesceStringList(review?.blocking_issues))
+    normalizedReview.blockingIssues
   );
   setSupportReviewItems(
     els.supportReviewCautionsSection,
     els.supportReviewCautions,
-    dedupeMessages(coalesceStringList(review?.cautions))
+    normalizedReview.cautions
   );
   syncComputeButtonState();
+}
+
+function normalizeSupportReviewSnapshot(review) {
+  const status = ["ready", "attention", "unsupported", "pending"].includes(review?.status)
+    ? review.status
+    : "attention";
+  const blockingIssues = dedupeMessages(
+    coalesceStringList(review?.blockingIssues ?? review?.blocking_issues)
+  );
+  const cautions = dedupeMessages(coalesceStringList(review?.cautions));
+
+  return {
+    status,
+    readyForEstimate:
+      (Boolean(review?.readyForEstimate) || Boolean(review?.ready_for_estimate)) &&
+      status === "ready",
+    summary:
+      review?.summary || "TaxVault reviewed this draft, but the status message was unavailable.",
+    blockingIssues,
+    cautions,
+  };
 }
 
 function supportReviewBadgeLabel(status) {
@@ -2413,6 +2822,8 @@ function computeReturn() {
 
   hideError();
   const originalLabel = els.computeBtn.textContent;
+  const draftEnvelope = buildStoredDraftEnvelope(captureDraftSnapshot());
+  const supportReview = normalizeSupportReviewSnapshot(state.lastSupportReview);
   els.computeBtn.disabled = true;
   els.computeBtn.setAttribute("aria-disabled", "true");
   els.computeBtn.textContent = "Calculating...";
@@ -2432,7 +2843,7 @@ function computeReturn() {
       return;
     }
 
-    renderResults(data);
+    renderResults(data, { draftEnvelope, supportReview });
     goToStep(3);
   } catch (error) {
     showError(`Computation error: ${safeMessage(error)}`);
@@ -2483,7 +2894,7 @@ function buildPayload() {
   return {
     payload: {
       input: {
-        tax_year: SUPPORTED_TAX_YEAR,
+        tax_year: currentTaxYear(),
         filing_status: state.filingStatus,
         primary_filer: filerPayload(primary),
         spouse: spouse ? filerPayload(spouse) : null,
@@ -2891,13 +3302,19 @@ function collectW2Cards(errors) {
   return w2s;
 }
 
-function renderResults(data) {
+function renderResults(data, { draftEnvelope = null, supportReview = null } = {}) {
+  state.lastComputedResult = data;
+  state.lastComputedDraftEnvelope = draftEnvelope || buildStoredDraftEnvelope(captureDraftSnapshot());
+  state.lastComputedSupportReview = normalizeSupportReviewSnapshot(
+    supportReview || state.lastSupportReview
+  );
   renderHero(data.summary);
   renderDraftPreview(data);
   renderMeta(data.meta);
   renderBreakdown(data.summary);
   renderTrace(data.trace);
   renderLines(data.form?.lines || {});
+  syncAuditExportButton();
 
   els.linesContainer.classList.remove("open");
   els.linesArrow.classList.remove("open");
@@ -2947,52 +3364,7 @@ function renderHero(summary) {
 }
 
 function renderBreakdown(summary) {
-  const rows = [
-    { section: "Income" },
-    { label: "Total Wages", value: fmtCurrency(summary.total_wages) },
-    { label: "Taxable Interest", value: fmtCurrency(summary.total_taxable_interest) },
-    { label: "Tax-Exempt Interest", value: fmtCurrency(summary.total_tax_exempt_interest) },
-    { label: "Ordinary Dividends", value: fmtCurrency(summary.total_ordinary_dividends) },
-    { label: "Qualified Dividends", value: fmtCurrency(summary.total_qualified_dividends) },
-    {
-      label: "Social Security Benefits",
-      value: fmtCurrency(summary.total_social_security_benefits),
-    },
-    {
-      label: "Taxable Social Security Benefits",
-      value: fmtCurrency(summary.taxable_social_security_benefits),
-    },
-    { label: "Total Income", value: fmtCurrency(summary.total_income), highlight: true },
-    { section: "Adjustments" },
-    {
-      label: "Traditional IRA Deduction",
-      value: fmtCurrency(summary.traditional_ira_deduction),
-    },
-    { label: "HSA Deduction", value: fmtCurrency(summary.hsa_deduction) },
-    {
-      label: "Student Loan Interest Deduction",
-      value: fmtCurrency(summary.student_loan_interest_deduction),
-    },
-    { label: "Total Adjustments", value: fmtCurrency(summary.total_adjustments), highlight: true },
-    { label: "Adjusted Gross Income", value: fmtCurrency(summary.adjusted_gross_income), highlight: true },
-    { section: "Deductions" },
-    { label: "Standard Deduction", value: fmtCurrency(summary.standard_deduction) },
-    { label: "Taxable Income", value: fmtCurrency(summary.taxable_income), highlight: true },
-    { section: "Credits" },
-    { label: "Child/Dependent Credit", value: fmtCurrency(summary.child_dependent_credit), highlight: true },
-    { section: "Tax" },
-    { label: "Income Tax Before Credits", value: fmtCurrency(summary.income_tax) },
-    { label: "Total Tax", value: fmtCurrency(summary.total_tax), highlight: true },
-    { section: "Payments" },
-    { label: "W-2 Federal Withholding", value: fmtCurrency(summary.total_w2_federal_withholding) },
-    {
-      label: "SSA-1099 Voluntary Withholding",
-      value: fmtCurrency(summary.total_social_security_withholding),
-    },
-    { label: "Total Federal Withholding", value: fmtCurrency(summary.total_federal_withholding) },
-    { label: "Additional Child Tax Credit", value: fmtCurrency(summary.additional_child_tax_credit) },
-    { label: "Total Payments", value: fmtCurrency(summary.total_payments), highlight: true },
-  ];
+  const rows = buildBreakdownRows(summary);
 
   els.breakdownContent.replaceChildren();
 
@@ -3009,9 +3381,76 @@ function renderBreakdown(summary) {
     });
     breakdownRow.append(
       createElement("span", { className: "label", text: row.label }),
-      createElement("span", { className: "value", text: row.value })
+      createElement("span", { className: "value", text: row.formattedValue })
     );
     els.breakdownContent.append(breakdownRow);
+  });
+}
+
+function buildBreakdownRows(summary) {
+  const descriptors = [
+    { section: "Income" },
+    { key: "total_wages", label: "Total Wages" },
+    { key: "total_taxable_interest", label: "Taxable Interest" },
+    { key: "total_tax_exempt_interest", label: "Tax-Exempt Interest" },
+    { key: "total_ordinary_dividends", label: "Ordinary Dividends" },
+    { key: "total_qualified_dividends", label: "Qualified Dividends" },
+    { key: "total_social_security_benefits", label: "Social Security Benefits" },
+    {
+      key: "taxable_social_security_benefits",
+      label: "Taxable Social Security Benefits",
+    },
+    { key: "total_income", label: "Total Income", highlight: true },
+    { section: "Adjustments" },
+    { key: "traditional_ira_deduction", label: "Traditional IRA Deduction" },
+    { key: "hsa_deduction", label: "HSA Deduction" },
+    {
+      key: "student_loan_interest_deduction",
+      label: "Student Loan Interest Deduction",
+    },
+    { key: "total_adjustments", label: "Total Adjustments", highlight: true },
+    { key: "adjusted_gross_income", label: "Adjusted Gross Income", highlight: true },
+    { section: "Deductions" },
+    { key: "standard_deduction", label: "Standard Deduction" },
+    { key: "taxable_income", label: "Taxable Income", highlight: true },
+    { section: "Credits" },
+    {
+      key: "child_dependent_credit",
+      label: "Child/Dependent Credit",
+      highlight: true,
+    },
+    { section: "Tax" },
+    { key: "income_tax", label: "Income Tax Before Credits" },
+    { key: "total_tax", label: "Total Tax", highlight: true },
+    { section: "Payments" },
+    { key: "total_w2_federal_withholding", label: "W-2 Federal Withholding" },
+    {
+      key: "total_social_security_withholding",
+      label: "SSA-1099 Voluntary Withholding",
+    },
+    { key: "total_federal_withholding", label: "Total Federal Withholding" },
+    {
+      key: "additional_child_tax_credit",
+      label: "Additional Child Tax Credit",
+    },
+    { key: "total_payments", label: "Total Payments", highlight: true },
+  ];
+
+  return descriptors.map((descriptor) => {
+    if (descriptor.section) {
+      return { section: descriptor.section };
+    }
+
+    const amount = Number(summary?.[descriptor.key]);
+    const normalizedAmount = Number.isFinite(amount) ? amount : 0;
+
+    return {
+      key: descriptor.key,
+      label: descriptor.label,
+      amount: normalizedAmount,
+      formattedValue: fmtCurrency(normalizedAmount),
+      highlight: Boolean(descriptor.highlight),
+    };
   });
 }
 
@@ -3213,6 +3652,35 @@ function resetDraftPreview() {
   els.printDraftBtn.disabled = true;
 }
 
+function resetComputedEstimate() {
+  if (
+    !state.lastComputedResult &&
+    !state.lastComputedDraftEnvelope &&
+    !state.lastComputedSupportReview
+  ) {
+    syncAuditExportButton();
+    return;
+  }
+
+  state.lastComputedResult = null;
+  state.lastComputedDraftEnvelope = null;
+  state.lastComputedSupportReview = null;
+  els.resultHero.replaceChildren();
+  els.resultMeta.replaceChildren();
+  els.scopeList.replaceChildren();
+  els.breakdownContent.replaceChildren();
+  els.traceContainer.textContent = "";
+  els.traceContainer.classList.remove("open");
+  els.traceArrow.classList.remove("open");
+  els.traceToggle.setAttribute("aria-expanded", "false");
+  els.linesContainer.replaceChildren();
+  els.linesContainer.classList.remove("open");
+  els.linesArrow.classList.remove("open");
+  els.linesToggle.setAttribute("aria-expanded", "false");
+  resetDraftPreview();
+  syncAuditExportButton();
+}
+
 function renderTrace(trace) {
   els.traceContainer.textContent = trace || "Trace unavailable.";
   els.traceContainer.scrollTop = 0;
@@ -3262,16 +3730,7 @@ function validateUniqueSsnEntries(errors, primary, spouse, dependents) {
 function renderLines(lines) {
   els.linesContainer.replaceChildren();
 
-  const keys = Object.keys(lines).sort((left, right) => {
-    const leftNumber = parseFloat(left);
-    const rightNumber = parseFloat(right);
-
-    if (!Number.isNaN(leftNumber) && !Number.isNaN(rightNumber) && leftNumber !== rightNumber) {
-      return leftNumber - rightNumber;
-    }
-
-    return left.localeCompare(right, undefined, { numeric: true });
-  });
+  const keys = sortedLineKeys(lines);
 
   keys.forEach((key) => {
     const row = createElement("div", { className: "line-row" });
@@ -3387,6 +3846,656 @@ function safeMessage(error) {
   return error instanceof Error ? error.message : String(error);
 }
 
+function draftExportFilename(envelope) {
+  const stampSource =
+    typeof envelope?.updatedAt === "string" && envelope.updatedAt ? envelope.updatedAt : new Date().toISOString();
+  const safeStamp = stampSource.replace(/[:.]/g, "-");
+  return `taxvault-${normalizeTaxYear(envelope?.taxYear)}-draft-${safeStamp}.json`;
+}
+
+function auditTrailExportFilename(envelope) {
+  const stampSource =
+    typeof envelope?.exportedAt === "string" && envelope.exportedAt
+      ? envelope.exportedAt
+      : new Date().toISOString();
+  const safeStamp = stampSource.replace(/[:.]/g, "-");
+  return `taxvault-${normalizeTaxYear(envelope?.taxYear)}-audit-trail-${safeStamp}.json`;
+}
+
+function reviewPacketExportFilename(envelope) {
+  const stampSource =
+    typeof envelope?.exportedAt === "string" && envelope.exportedAt
+      ? envelope.exportedAt
+      : new Date().toISOString();
+  const safeStamp = stampSource.replace(/[:.]/g, "-");
+  return `taxvault-${normalizeTaxYear(envelope?.taxYear)}-review-packet-${safeStamp}.html`;
+}
+
+function downloadFile(contents, fileName, mimeType) {
+  const blob = new Blob([contents], { type: mimeType });
+  const blobUrl = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = blobUrl;
+  link.download = fileName;
+  document.body.append(link);
+  link.click();
+  link.remove();
+  window.setTimeout(() => {
+    URL.revokeObjectURL(blobUrl);
+  }, 0);
+}
+
+function downloadJsonFile(contents, fileName) {
+  downloadFile(contents, fileName, "application/json");
+}
+
+function exportDraftToFile() {
+  hideError();
+  const envelope = buildStoredDraftEnvelope(captureDraftSnapshot());
+  if (!envelope) {
+    showError("Add some draft data before exporting a TaxVault draft file.");
+    return;
+  }
+
+  storeDraftEnvelope(envelope, { refreshStatus: false });
+  downloadJsonFile(JSON.stringify(envelope, null, 2), draftExportFilename(envelope));
+  refreshStorageStatus("Draft exported. SSNs and EINs are never included in TaxVault draft files.");
+  announceUiStatus("Draft exported.");
+}
+
+function buildAuditTrailEnvelope(result, { draftEnvelope = null, supportReview = null } = {}) {
+  if (!isPlainObject(result)) {
+    return null;
+  }
+
+  const summary =
+    result.summary && typeof result.summary === "object" && !Array.isArray(result.summary)
+      ? { ...result.summary }
+      : {};
+  const meta =
+    result.meta && typeof result.meta === "object" && !Array.isArray(result.meta)
+      ? { ...result.meta }
+      : {};
+  const form =
+    result.form && typeof result.form === "object" && !Array.isArray(result.form)
+      ? result.form
+      : {};
+  const lines =
+    form.lines && typeof form.lines === "object" && !Array.isArray(form.lines) ? { ...form.lines } : {};
+  const taxYear = Number(summary.tax_year || form.tax_year || currentTaxYear());
+  const normalizedSupportReview = supportReview ? normalizeSupportReviewSnapshot(supportReview) : null;
+
+  return {
+    type: AUDIT_TRAIL_FILE_TYPE,
+    version: AUDIT_TRAIL_VERSION,
+    appVersion: APP_VERSION,
+    taxYear: Number.isInteger(taxYear) ? taxYear : currentTaxYear(),
+    exportedAt: new Date().toISOString(),
+    draftEnvelope,
+    supportReview: normalizedSupportReview,
+    estimate: {
+      summary,
+      meta,
+      breakdown: buildBreakdownRows(summary),
+      form: {
+        formId:
+          typeof form.form_id === "string" && form.form_id.trim() ? form.form_id.trim() : "1040",
+        taxYear: Number.isInteger(taxYear) ? taxYear : currentTaxYear(),
+        lines,
+      },
+      trace: typeof result.trace === "string" ? result.trace : "",
+    },
+  };
+}
+
+function buildCurrentAuditTrailEnvelope() {
+  return buildAuditTrailEnvelope(state.lastComputedResult, {
+    draftEnvelope: state.lastComputedDraftEnvelope,
+    supportReview: state.lastComputedSupportReview,
+  });
+}
+
+function escapeHtml(value) {
+  return String(value ?? "")
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
+}
+
+function formatReviewPacketTimestamp(value) {
+  const parsed = new Date(value);
+  if (Number.isNaN(parsed.getTime())) {
+    return "Unavailable";
+  }
+
+  return draftTimestampFormatter.format(parsed);
+}
+
+function formatIncomeRecipientLabel(value) {
+  return value === "spouse" ? "Spouse" : "Primary filer";
+}
+
+function formatDependentRelationshipLabel(value) {
+  const option = DEPENDENT_RELATIONSHIP_OPTIONS.find((entry) => entry.value === value);
+  return option?.label || "Unspecified";
+}
+
+function summarizeEstimateHeadline(summary) {
+  const overpayment = Number(summary?.overpayment);
+  const balanceDue = Number(summary?.balance_due);
+
+  if (overpayment > 0) {
+    return {
+      label: "Estimated Federal Refund",
+      amount: fmtCurrency(overpayment),
+      note: "Review only. Do not use this number to file a return.",
+    };
+  }
+
+  if (balanceDue > 0) {
+    return {
+      label: "Estimated Amount Owed",
+      amount: fmtCurrency(balanceDue),
+      note: "Review only. Do not use this number to file a return.",
+    };
+  }
+
+  return {
+    label: "Estimated Tax Status",
+    amount: fmtCurrency(0),
+    note: "A zero balance does not mean the return is filing-ready.",
+  };
+}
+
+function sortedLineKeys(lines) {
+  return Object.keys(lines).sort((left, right) => {
+    const leftNumber = parseFloat(left);
+    const rightNumber = parseFloat(right);
+
+    if (!Number.isNaN(leftNumber) && !Number.isNaN(rightNumber) && leftNumber !== rightNumber) {
+      return leftNumber - rightNumber;
+    }
+
+    return left.localeCompare(right, undefined, { numeric: true });
+  });
+}
+
+function renderReviewPacketList(items) {
+  if (!Array.isArray(items) || items.length === 0) {
+    return '<p class="empty-state">None.</p>';
+  }
+
+  return `<ul>${items.map((item) => `<li>${escapeHtml(item)}</li>`).join("")}</ul>`;
+}
+
+function renderReviewPacketTable(headers, rows) {
+  if (!Array.isArray(rows) || rows.length === 0) {
+    return '<p class="empty-state">None.</p>';
+  }
+
+  const thead = `<thead><tr>${headers
+    .map((header) => `<th>${escapeHtml(header)}</th>`)
+    .join("")}</tr></thead>`;
+  const tbody = `<tbody>${rows
+    .map(
+      (row) =>
+        `<tr>${row
+          .map((cell) => `<td>${escapeHtml(cell)}</td>`)
+          .join("")}</tr>`
+    )
+    .join("")}</tbody>`;
+
+  return `<table>${thead}${tbody}</table>`;
+}
+
+function buildReviewPacketHtml(envelope) {
+  if (!isPlainObject(envelope)) {
+    return "";
+  }
+
+  const draft = envelope.draftEnvelope?.draft || {};
+  const supportReview = envelope.supportReview || null;
+  const estimate = envelope.estimate || {};
+  const summary = estimate.summary || {};
+  const meta = estimate.meta || {};
+  const form = estimate.form || {};
+  const lines = form.lines || {};
+  const breakdownRows = Array.isArray(estimate.breakdown) ? estimate.breakdown : [];
+  const headline = summarizeEstimateHeadline(summary);
+  const primaryName = formatDraftPerson(draft.primaryFiler);
+  const spouseName = formatDraftPerson(draft.spouse);
+
+  const summaryCards = [
+    ["Tax Year", String(envelope.taxYear || "Unavailable")],
+    ["Filing Status", formatFilingStatusLabel(summary.filing_status || draft.filingStatus)],
+    ["Primary Filer", primaryName],
+    ["Spouse", spouseName],
+    ["Generated", formatReviewPacketTimestamp(envelope.exportedAt)],
+    [
+      "Rule Pack",
+      meta.rule_pack_version ? `Federal rules ${meta.rule_pack_version}` : "Unavailable",
+    ],
+  ];
+
+  const inputRows = [
+    ["W-2 forms", String(Array.isArray(draft.w2s) ? draft.w2s.length : 0)],
+    ["SSA-1099 forms", String(Array.isArray(draft.socialSecurityIncome) ? draft.socialSecurityIncome.length : 0)],
+    ["1099-INT forms", String(Array.isArray(draft.interestIncome) ? draft.interestIncome.length : 0)],
+    ["1099-DIV forms", String(Array.isArray(draft.dividendIncome) ? draft.dividendIncome.length : 0)],
+    ["Dependents", String(Array.isArray(draft.dependents) ? draft.dependents.length : 0)],
+    [
+      "Adjustments entered",
+      [draft.adjustments?.traditionalIraDeduction, draft.adjustments?.hsaDeduction, draft.adjustments?.studentLoanInterestPaid]
+        .filter((value) => String(value || "").trim() !== "")
+        .length > 0
+        ? "Yes"
+        : "No",
+    ],
+  ];
+
+  const adjustmentRows = [
+    ["Traditional IRA Deduction", draft.adjustments?.traditionalIraDeduction || "0"],
+    ["HSA Deduction", draft.adjustments?.hsaDeduction || "0"],
+    ["Student Loan Interest Paid", draft.adjustments?.studentLoanInterestPaid || "0"],
+  ];
+
+  const dependentRows = Array.isArray(draft.dependents)
+    ? draft.dependents.map((dependent) => [
+        [dependent.firstName, dependent.lastName].filter(Boolean).join(" ").trim() || "Not entered",
+        dependent.dob || "Not entered",
+        formatDependentRelationshipLabel(dependent.relationship),
+        dependent.monthsLivedInHome || "0",
+      ])
+    : [];
+
+  const w2Rows = Array.isArray(draft.w2s)
+    ? draft.w2s.map((w2) => [
+        w2.employerName || "Employer not entered",
+        formatIncomeRecipientLabel(w2.recipient),
+        w2.wages || "0",
+        w2.federalTaxWithheld || "0",
+      ])
+    : [];
+
+  const interestRows = Array.isArray(draft.interestIncome)
+    ? draft.interestIncome.map((item) => [
+        item.payerName || "Institution not entered",
+        formatIncomeRecipientLabel(item.recipient),
+        item.taxableInterest || "0",
+        item.taxExemptInterest || "0",
+      ])
+    : [];
+
+  const dividendRows = Array.isArray(draft.dividendIncome)
+    ? draft.dividendIncome.map((item) => [
+        item.payerName || "Institution not entered",
+        formatIncomeRecipientLabel(item.recipient),
+        item.ordinaryDividends || "0",
+        item.qualifiedDividends || "0",
+      ])
+    : [];
+
+  const socialSecurityRows = Array.isArray(draft.socialSecurityIncome)
+    ? draft.socialSecurityIncome.map((item) => [
+        formatIncomeRecipientLabel(item.recipient),
+        item.totalBenefits || "0",
+        item.voluntaryWithholding || "0",
+      ])
+    : [];
+
+  const breakdownTableRows = breakdownRows
+    .filter((row) => row && !row.section)
+    .map((row) => [row.label || "Unlabeled row", row.formattedValue || "0.00"]);
+
+  const lineRows = sortedLineKeys(lines).map((line) => [
+    `Line ${line}`,
+    formatLineValue(lines[line]),
+  ]);
+
+  return `<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>TaxVault Review Packet</title>
+<style>
+  :root {
+    color-scheme: light;
+    --ink: #0f172a;
+    --muted: #475569;
+    --line: #cbd5e1;
+    --panel: #ffffff;
+    --soft: #f8fafc;
+    --accent: #0f766e;
+    --warning: #b45309;
+    --danger: #b91c1c;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    padding: 2rem;
+    font-family: "Iowan Old Style", "Palatino Linotype", "Book Antiqua", Georgia, serif;
+    color: var(--ink);
+    background: linear-gradient(180deg, #f8fafc 0%, #eef2ff 100%);
+  }
+  main {
+    max-width: 960px;
+    margin: 0 auto;
+  }
+  .hero, section {
+    background: rgba(255, 255, 255, 0.96);
+    border: 1px solid rgba(148, 163, 184, 0.28);
+    border-radius: 18px;
+    padding: 1.4rem 1.5rem;
+    box-shadow: 0 12px 30px rgba(15, 23, 42, 0.06);
+    margin-bottom: 1rem;
+  }
+  .eyebrow {
+    font: 700 0.78rem/1.2 "IBM Plex Sans", "Avenir Next", Helvetica, sans-serif;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    color: var(--accent);
+  }
+  h1, h2, h3 {
+    margin: 0;
+    line-height: 1.1;
+  }
+  h1 { font-size: 2.2rem; margin-top: 0.35rem; }
+  h2 { font-size: 1.15rem; margin-bottom: 0.9rem; }
+  p, li, td, th, div { font-size: 0.98rem; }
+  .hero-note, .muted, .empty-state { color: var(--muted); }
+  .amount {
+    margin: 0.6rem 0 0.35rem;
+    font-size: 2.1rem;
+    font-weight: 700;
+    color: var(--accent);
+  }
+  .grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+    gap: 0.8rem;
+  }
+  .card {
+    background: var(--soft);
+    border: 1px solid var(--line);
+    border-radius: 14px;
+    padding: 0.9rem 1rem;
+  }
+  .label {
+    font: 700 0.75rem/1.2 "IBM Plex Sans", "Avenir Next", Helvetica, sans-serif;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--muted);
+    margin-bottom: 0.35rem;
+  }
+  ul {
+    margin: 0.45rem 0 0;
+    padding-left: 1.15rem;
+  }
+  table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 0.94rem;
+  }
+  th, td {
+    text-align: left;
+    padding: 0.55rem 0.45rem;
+    border-bottom: 1px solid var(--line);
+    vertical-align: top;
+  }
+  th {
+    font: 700 0.78rem/1.2 "IBM Plex Sans", "Avenir Next", Helvetica, sans-serif;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--muted);
+  }
+  .section-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+    gap: 1rem;
+  }
+  .status-pill {
+    display: inline-block;
+    padding: 0.28rem 0.6rem;
+    border-radius: 999px;
+    background: #ecfeff;
+    border: 1px solid #99f6e4;
+    color: #115e59;
+    font: 700 0.8rem/1 "IBM Plex Sans", "Avenir Next", Helvetica, sans-serif;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+  }
+  pre {
+    margin: 0;
+    padding: 1rem;
+    background: #0f172a;
+    color: #e2e8f0;
+    border-radius: 14px;
+    overflow: auto;
+    white-space: pre-wrap;
+    word-break: break-word;
+    font: 0.84rem/1.45 "SFMono-Regular", Menlo, Consolas, monospace;
+  }
+  @media print {
+    body {
+      background: #fff;
+      padding: 0;
+    }
+    .hero, section {
+      box-shadow: none;
+      break-inside: avoid;
+    }
+  }
+</style>
+</head>
+<body>
+<main>
+  <section class="hero">
+    <div class="eyebrow">TaxVault Review Packet</div>
+    <h1>${escapeHtml(headline.label)}</h1>
+    <div class="amount">${escapeHtml(headline.amount)}</div>
+    <p class="hero-note">${escapeHtml(headline.note)}</p>
+    <p class="muted">Generated locally on ${escapeHtml(formatReviewPacketTimestamp(envelope.exportedAt))}. This packet is for review only and is not a filing-ready return.</p>
+  </section>
+
+  <section>
+    <h2>Estimate Summary</h2>
+    <div class="grid">
+      ${summaryCards
+        .map(
+          ([label, value]) => `<div class="card"><div class="label">${escapeHtml(label)}</div><div>${escapeHtml(value)}</div></div>`
+        )
+        .join("")}
+    </div>
+  </section>
+
+  <section>
+    <h2>Estimate Readiness</h2>
+    <div class="section-grid">
+      <div class="card">
+        <div class="label">Status</div>
+        <div class="status-pill">${escapeHtml(
+          supportReview ? supportReviewBadgeLabel(supportReview.status) : "Unavailable"
+        )}</div>
+        <p>${escapeHtml(supportReview?.summary || "TaxVault did not capture a support review summary for this export.")}</p>
+      </div>
+      <div class="card">
+        <div class="label">Blocking Issues</div>
+        ${renderReviewPacketList(supportReview?.blockingIssues)}
+      </div>
+      <div class="card">
+        <div class="label">Cautions</div>
+        ${renderReviewPacketList(supportReview?.cautions)}
+      </div>
+    </div>
+  </section>
+
+  <section>
+    <h2>Scope and Metadata</h2>
+    ${renderReviewPacketTable(
+      ["Field", "Value"],
+      [
+        ["Estimate Scope", meta.estimate_scope || "Unavailable"],
+        ["Tax Table Status", meta ? formatTaxTableStatus(meta) : "Unavailable"],
+        ["Rule Pack", meta.rule_pack_version ? `Federal rules version ${meta.rule_pack_version}` : "Unavailable"],
+        ["Privacy", meta.privacy || "Unavailable"],
+      ]
+    )}
+    <div class="card" style="margin-top: 0.9rem;">
+      <div class="label">Scope Limits</div>
+      ${renderReviewPacketList(meta.scope_limits)}
+    </div>
+  </section>
+
+  <section>
+    <h2>Entered Inputs</h2>
+    <div class="section-grid">
+      <div class="card">
+        <div class="label">Input Counts</div>
+        ${renderReviewPacketTable(["Field", "Value"], inputRows)}
+      </div>
+      <div class="card">
+        <div class="label">Adjustments</div>
+        ${renderReviewPacketTable(["Adjustment", "Entered Amount"], adjustmentRows)}
+      </div>
+    </div>
+    <div class="section-grid" style="margin-top: 1rem;">
+      <div class="card">
+        <div class="label">Dependents</div>
+        ${renderReviewPacketTable(["Name", "DOB", "Relationship", "Months in Home"], dependentRows)}
+      </div>
+      <div class="card">
+        <div class="label">W-2 Forms</div>
+        ${renderReviewPacketTable(["Employer", "Recipient", "Wages", "Federal Withholding"], w2Rows)}
+      </div>
+    </div>
+    <div class="section-grid" style="margin-top: 1rem;">
+      <div class="card">
+        <div class="label">1099-INT Forms</div>
+        ${renderReviewPacketTable(["Institution", "Recipient", "Taxable Interest", "Tax-Exempt Interest"], interestRows)}
+      </div>
+      <div class="card">
+        <div class="label">1099-DIV Forms</div>
+        ${renderReviewPacketTable(["Institution", "Recipient", "Ordinary Dividends", "Qualified Dividends"], dividendRows)}
+      </div>
+    </div>
+    <div class="card" style="margin-top: 1rem;">
+      <div class="label">SSA-1099 Forms</div>
+      ${renderReviewPacketTable(["Recipient", "Total Benefits", "Voluntary Withholding"], socialSecurityRows)}
+    </div>
+  </section>
+
+  <section>
+    <h2>Tax Breakdown</h2>
+    ${renderReviewPacketTable(["Line Item", "Amount"], breakdownTableRows)}
+  </section>
+
+  <section>
+    <h2>Draft Form 1040 Lines</h2>
+    ${renderReviewPacketTable(["Form Line", "Value"], lineRows)}
+  </section>
+
+  <section>
+    <h2>Calculation Trace</h2>
+    <pre>${escapeHtml(estimate.trace || "Trace unavailable.")}</pre>
+  </section>
+</main>
+</body>
+</html>`;
+}
+
+function syncAuditExportButton() {
+  const disabled = !buildCurrentAuditTrailEnvelope();
+
+  if (els.exportAuditBtn) {
+    els.exportAuditBtn.disabled = disabled;
+    els.exportAuditBtn.setAttribute("aria-disabled", String(disabled));
+  }
+
+  if (els.exportReviewPacketBtn) {
+    els.exportReviewPacketBtn.disabled = disabled;
+    els.exportReviewPacketBtn.setAttribute("aria-disabled", String(disabled));
+  }
+}
+
+function exportAuditTrailToFile() {
+  hideError();
+  const envelope = buildCurrentAuditTrailEnvelope();
+  if (!envelope) {
+    showError("Calculate a supported return before exporting an audit trail.");
+    return;
+  }
+
+  downloadJsonFile(JSON.stringify(envelope, null, 2), auditTrailExportFilename(envelope));
+  announceUiStatus("Audit trail exported.");
+}
+
+function exportReviewPacketToFile() {
+  hideError();
+  const envelope = buildCurrentAuditTrailEnvelope();
+  if (!envelope) {
+    showError("Calculate a supported return before exporting a review packet.");
+    return;
+  }
+
+  const html = buildReviewPacketHtml(envelope);
+  downloadFile(html, reviewPacketExportFilename(envelope), "text/html");
+  announceUiStatus("Review packet exported.");
+}
+
+function openDraftImportPicker() {
+  hideError();
+  if (!els.importDraftInput) {
+    return;
+  }
+
+  els.importDraftInput.value = "";
+  els.importDraftInput.click();
+}
+
+function readTextFromFile(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onerror = () => reject(new Error("Could not read the selected draft file."));
+    reader.onload = () => resolve(typeof reader.result === "string" ? reader.result : "");
+    reader.readAsText(file);
+  });
+}
+
+async function handleImportDraftFileSelection(event) {
+  const input = event.target;
+  const [file] = Array.from(input?.files || []);
+  if (!file) {
+    return;
+  }
+
+  hideError();
+
+  try {
+    const rawText = await readTextFromFile(file);
+    let parsedDraft;
+    try {
+      parsedDraft = JSON.parse(rawText);
+    } catch {
+      showError(`Could not read ${file.name}. Choose a valid TaxVault draft JSON file.`);
+      return;
+    }
+
+    const result = importDraftValue(parsedDraft);
+    if (!result.ok) {
+      showError(result.message);
+    }
+  } catch (error) {
+    showError(`Unable to import ${file.name}: ${safeMessage(error)}`);
+  } finally {
+    if (input) {
+      input.value = "";
+    }
+  }
+}
+
 function printDraftReturn() {
   if (els.printDraftBtn.disabled) {
     showError("Calculate a supported return before printing a draft preview.");
@@ -3410,6 +4519,7 @@ function clearAllData() {
   window.clearTimeout(draftSaveTimer);
   hideError();
   resetSupportReview();
+  resetComputedEstimate();
   cleanupReferencePreviews(els.app);
   document.getElementById("pFirst").value = "";
   document.getElementById("pLast").value = "";
@@ -3432,19 +4542,6 @@ function clearAllData() {
   els.dividendContainer.replaceChildren();
   els.dependentContainer.replaceChildren();
   renderIncomeSummaryChips();
-  els.resultHero.replaceChildren();
-  els.resultMeta.replaceChildren();
-  els.scopeList.replaceChildren();
-  resetDraftPreview();
-  els.breakdownContent.replaceChildren();
-  els.traceContainer.textContent = "";
-  els.traceContainer.classList.remove("open");
-  els.traceArrow.classList.remove("open");
-  els.traceToggle.setAttribute("aria-expanded", "false");
-  els.linesContainer.replaceChildren();
-  els.linesContainer.classList.remove("open");
-  els.linesArrow.classList.remove("open");
-  els.linesToggle.setAttribute("aria-expanded", "false");
 
   state.currentStep = 1;
   state.w2Count = 0;
@@ -3463,12 +4560,13 @@ function clearAllData() {
   });
 
   state.safetyAcknowledged = false;
+  state.draftEnvelopeCreatedAt = null;
   els.gateAcknowledge.checked = false;
   updateGateButtonState();
   els.app.classList.add("hidden");
-  removeStoredValue(storageFor("session"), SESSION_DRAFT_STORAGE_KEY);
-  removeStoredValue(storageFor("local"), LOCAL_DRAFT_STORAGE_KEY);
-  removeStoredValue(storageFor("local"), LOCAL_DRAFT_PREFERENCE_KEY);
+  removeStoredValue(storageFor("session"), draftSessionStorageKey());
+  removeStoredValue(storageFor("local"), draftLocalStorageKey());
+  removeStoredValue(storageFor("local"), draftPreferenceStorageKey());
   if (els.rememberDraftToggle) {
     els.rememberDraftToggle.checked = false;
   }
@@ -3840,6 +4938,14 @@ function createReferenceZone(formLabel) {
 if (typeof window !== "undefined") {
   window.__taxvaultTesting = Object.freeze({
     goToStep,
+    importDraftValue,
     renderResults,
+    getRuntimeConfig: () => ({
+      selectedTaxYear: currentTaxYear(),
+      supportedTaxYears: state.supportedTaxYears.map((entry) => ({ ...entry })),
+    }),
+    exportCurrentDraftEnvelope: () => buildStoredDraftEnvelope(captureDraftSnapshot()),
+    exportCurrentAuditTrail: () => buildCurrentAuditTrailEnvelope(),
+    exportCurrentReviewPacketHtml: () => buildReviewPacketHtml(buildCurrentAuditTrailEnvelope()),
   });
 }

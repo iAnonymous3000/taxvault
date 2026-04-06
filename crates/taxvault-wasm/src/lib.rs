@@ -12,9 +12,24 @@ use taxvault_engine::{
 use taxvault_forms::{compile_1040, FormLineMap};
 use taxvault_loader::{load_rule_pack, load_tax_facts};
 
-const RULES_TOML: &str = include_str!("../../../rules/federal_2025.toml");
-const TAX_TABLE_CSV: &str = include_str!("../../../tax-table/federal_2025_table.csv");
-static EMBEDDED_RULE_PACK: OnceLock<Result<RulePack, String>> = OnceLock::new();
+struct EmbeddedRulePackSource {
+    tax_year: u16,
+    rules_toml: &'static str,
+    tax_table_csv: &'static str,
+}
+
+struct LoadedEmbeddedRulePack {
+    tax_year: u16,
+    load_result: Result<RulePack, String>,
+}
+
+const EMBEDDED_RULE_PACK_SOURCES: &[EmbeddedRulePackSource] = &[EmbeddedRulePackSource {
+    tax_year: 2025,
+    rules_toml: include_str!("../../../rules/federal_2025.toml"),
+    tax_table_csv: include_str!("../../../tax-table/federal_2025_table.csv"),
+}];
+
+static EMBEDDED_RULE_PACKS: OnceLock<Vec<LoadedEmbeddedRulePack>> = OnceLock::new();
 
 #[derive(Serialize)]
 struct WasmResult {
@@ -74,6 +89,26 @@ struct EstimateMeta {
     scope_limits: Vec<String>,
 }
 
+#[derive(Serialize)]
+struct AppConfig {
+    default_tax_year: u16,
+    supported_tax_years: Vec<SupportedTaxYearConfig>,
+}
+
+#[derive(Serialize)]
+struct SupportedTaxYearConfig {
+    tax_year: u16,
+    available: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    rule_pack_version: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    tax_table_verification_status: Option<String>,
+    tax_table_local_estimate_ready: bool,
+    tax_table_human_verified: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    load_error: Option<String>,
+}
+
 #[derive(Debug, Serialize)]
 struct InputReview {
     ready_for_estimate: bool,
@@ -99,14 +134,18 @@ pub fn review_tax_input(json_input: &str) -> String {
     serialize_response(&review)
 }
 
+#[wasm_bindgen]
+pub fn get_app_config() -> String {
+    serialize_response(&build_app_config())
+}
+
 fn compute_tax_inner(json_input: &str) -> WasmResult {
-    // Load rule pack (embedded)
-    let rules = match embedded_rule_pack() {
-        Ok(rules) => rules,
-        Err(error) => {
+    let facts = match load_tax_facts(json_input) {
+        Ok(f) => f,
+        Err(e) => {
             return WasmResult {
                 success: false,
-                error: Some(format!("Rule pack error: {error}")),
+                error: Some(format!("Input error: {e}")),
                 summary: None,
                 form: None,
                 meta: None,
@@ -115,13 +154,12 @@ fn compute_tax_inner(json_input: &str) -> WasmResult {
         }
     };
 
-    // Parse input
-    let facts = match load_tax_facts(json_input) {
-        Ok(f) => f,
-        Err(e) => {
+    let rules = match embedded_rule_pack_for_year(facts.tax_year) {
+        Ok(rules) => rules,
+        Err(error) => {
             return WasmResult {
                 success: false,
-                error: Some(format!("Input error: {e}")),
+                error: Some(format!("Rule pack error: {error}")),
                 summary: None,
                 form: None,
                 meta: None,
@@ -166,10 +204,10 @@ fn compute_tax_inner(json_input: &str) -> WasmResult {
     {
         return WasmResult {
             success: false,
-            error: Some(
-                "TaxVault is locked because the embedded 2025 federal tax table is still unverified. Mark it machine_checked for local/private estimates or human_verified for public-release signoff."
-                    .into(),
-            ),
+            error: Some(format!(
+                "TaxVault is locked because the embedded {} federal tax table is still unverified. Mark it machine_checked for local/private estimates or human_verified for public-release signoff.",
+                rules.meta.tax_year
+            )),
             summary: None,
             form: None,
             meta: None,
@@ -236,10 +274,10 @@ fn compute_tax_inner(json_input: &str) -> WasmResult {
     ];
 
     if !rules.meta.table_verification_status.is_human_verified() {
-        scope_limits.push(
-            "The embedded 2025 federal tax table is machine-checked, not human-verified. Treat this build as local/private estimate software only."
-                .into(),
-        );
+        scope_limits.push(format!(
+            "The embedded {} federal tax table is machine-checked, not human-verified. Treat this build as local/private estimate software only.",
+            rules.meta.tax_year
+        ));
     }
 
     let meta = EstimateMeta {
@@ -247,9 +285,10 @@ fn compute_tax_inner(json_input: &str) -> WasmResult {
         tax_table_verification_status: rules.meta.table_verification_status.as_str().into(),
         tax_table_local_estimate_ready: rules.meta.table_verification_status.allows_estimate_compute(),
         tax_table_human_verified: rules.meta.table_verification_status.is_human_verified(),
-        estimate_scope:
-            "Narrow 2025 federal estimate for supported W-2, SSA-1099, 1099-INT, 1099-DIV, and limited above-the-line deduction scenarios only."
-                .into(),
+        estimate_scope: format!(
+            "Narrow {} federal estimate for supported W-2, SSA-1099, 1099-INT, 1099-DIV, and limited above-the-line deduction scenarios only.",
+            rules.meta.tax_year
+        ),
         privacy:
             "Runs entirely in your browser. Drafts autosave in this tab by default, and device storage stays opt-in."
             .into(),
@@ -275,19 +314,6 @@ fn format_error_list(prefix: &str, messages: &[String]) -> String {
 }
 
 fn review_tax_input_inner(json_input: &str) -> InputReview {
-    let rules = match embedded_rule_pack() {
-        Ok(rules) => rules,
-        Err(error) => {
-            return InputReview {
-                ready_for_estimate: false,
-                status: "attention".into(),
-                summary: "TaxVault could not load its embedded 2025 rules.".into(),
-                blocking_issues: vec![format!("Rule pack error: {error}")],
-                cautions: vec![],
-            };
-        }
-    };
-
     let facts = match load_tax_facts(json_input) {
         Ok(facts) => facts,
         Err(error) => {
@@ -296,6 +322,22 @@ fn review_tax_input_inner(json_input: &str) -> InputReview {
                 status: "attention".into(),
                 summary: "Finish the required fields so TaxVault can review this draft.".into(),
                 blocking_issues: vec![format!("Input error: {error}")],
+                cautions: vec![],
+            };
+        }
+    };
+
+    let rules = match embedded_rule_pack_for_year(facts.tax_year) {
+        Ok(rules) => rules,
+        Err(error) => {
+            return InputReview {
+                ready_for_estimate: false,
+                status: "unsupported".into(),
+                summary: format!(
+                    "TaxVault does not include an embedded federal rule pack for tax year {} in this build.",
+                    facts.tax_year
+                ),
+                blocking_issues: vec![format!("Rule pack error: {error}")],
                 cautions: vec![],
             };
         }
@@ -331,13 +373,14 @@ fn review_tax_input_inner(json_input: &str) -> InputReview {
         return InputReview {
             ready_for_estimate: false,
             status: "attention".into(),
-            summary:
-                "TaxVault reviewed the draft, but estimate calculations stay locked until the embedded 2025 tax table is at least machine-checked."
-                    .into(),
-            blocking_issues: vec![
-                "Embedded 2025 federal tax table is still marked unverified. Mark it machine_checked for local/private estimates or human_verified before any public release."
-                    .into(),
-            ],
+            summary: format!(
+                "TaxVault reviewed the draft, but estimate calculations stay locked until the embedded {} tax table is at least machine-checked.",
+                rules.meta.tax_year
+            ),
+            blocking_issues: vec![format!(
+                "Embedded {} federal tax table is still marked unverified. Mark it machine_checked for local/private estimates or human_verified before any public release.",
+                rules.meta.tax_year
+            )],
             cautions,
         };
     }
@@ -345,7 +388,10 @@ fn review_tax_input_inner(json_input: &str) -> InputReview {
     if rules.meta.table_verification_status == TaxTableVerificationStatus::MachineChecked {
         push_unique(
             &mut cautions,
-            "The embedded 2025 federal tax table is machine-checked, not human-verified. This build is suitable for local/private estimates, not public-release signoff.",
+            &format!(
+                "The embedded {} federal tax table is machine-checked, not human-verified. This build is suitable for local/private estimates, not public-release signoff.",
+                rules.meta.tax_year
+            ),
         );
     }
 
@@ -446,12 +492,100 @@ fn serialize_fallback_error(error: &serde_json::Error) -> String {
     .to_string()
 }
 
-fn embedded_rule_pack() -> Result<&'static RulePack, String> {
-    match EMBEDDED_RULE_PACK
-        .get_or_init(|| load_rule_pack(RULES_TOML, TAX_TABLE_CSV).map_err(|e| e.to_string()))
-    {
+fn build_app_config() -> AppConfig {
+    let supported_tax_years: Vec<SupportedTaxYearConfig> = embedded_rule_pack_entries()
+        .iter()
+        .map(|entry| match &entry.load_result {
+            Ok(rule_pack) => SupportedTaxYearConfig {
+                tax_year: entry.tax_year,
+                available: true,
+                rule_pack_version: Some(rule_pack.meta.version.clone()),
+                tax_table_verification_status: Some(
+                    rule_pack.meta.table_verification_status.as_str().into(),
+                ),
+                tax_table_local_estimate_ready: rule_pack
+                    .meta
+                    .table_verification_status
+                    .allows_estimate_compute(),
+                tax_table_human_verified: rule_pack
+                    .meta
+                    .table_verification_status
+                    .is_human_verified(),
+                load_error: None,
+            },
+            Err(error) => SupportedTaxYearConfig {
+                tax_year: entry.tax_year,
+                available: false,
+                rule_pack_version: None,
+                tax_table_verification_status: None,
+                tax_table_local_estimate_ready: false,
+                tax_table_human_verified: false,
+                load_error: Some(error.clone()),
+            },
+        })
+        .collect();
+
+    let default_tax_year = supported_tax_years
+        .iter()
+        .filter(|year| year.available)
+        .map(|year| year.tax_year)
+        .max()
+        .or_else(|| supported_tax_years.iter().map(|year| year.tax_year).max())
+        .unwrap_or(2025);
+
+    AppConfig {
+        default_tax_year,
+        supported_tax_years,
+    }
+}
+
+fn embedded_rule_pack_entries() -> &'static [LoadedEmbeddedRulePack] {
+    EMBEDDED_RULE_PACKS
+        .get_or_init(|| {
+            EMBEDDED_RULE_PACK_SOURCES
+                .iter()
+                .map(|source| LoadedEmbeddedRulePack {
+                    tax_year: source.tax_year,
+                    load_result: load_rule_pack(source.rules_toml, source.tax_table_csv)
+                        .map_err(|error| error.to_string()),
+                })
+                .collect()
+        })
+        .as_slice()
+}
+
+fn embedded_rule_pack_for_year(tax_year: u16) -> Result<&'static RulePack, String> {
+    let Some(entry) = embedded_rule_pack_entries()
+        .iter()
+        .find(|entry| entry.tax_year == tax_year)
+    else {
+        return Err(unsupported_tax_year_error(tax_year));
+    };
+
+    match &entry.load_result {
         Ok(rule_pack) => Ok(rule_pack),
         Err(error) => Err(error.clone()),
+    }
+}
+
+fn unsupported_tax_year_error(tax_year: u16) -> String {
+    let supported_years: Vec<String> = embedded_rule_pack_entries()
+        .iter()
+        .filter(|entry| entry.load_result.is_ok())
+        .map(|entry| entry.tax_year.to_string())
+        .collect();
+
+    if supported_years.is_empty() {
+        format!(
+            "TaxVault does not have any embedded federal rule packs available in this build, so tax year {} cannot be loaded.",
+            tax_year
+        )
+    } else {
+        format!(
+            "TaxVault does not have embedded federal rules for tax year {} in this build. Available embedded years: {}.",
+            tax_year,
+            supported_years.join(", ")
+        )
     }
 }
 
@@ -474,11 +608,21 @@ mod tests {
 
     #[test]
     fn embedded_rule_pack_allows_local_estimates() {
-        let rules = embedded_rule_pack().expect("embedded rule pack should load");
+        let rules = embedded_rule_pack_for_year(2025).expect("embedded rule pack should load");
         assert!(rules
             .meta
             .table_verification_status
             .allows_estimate_compute());
+    }
+
+    #[test]
+    fn app_config_lists_embedded_tax_years() {
+        let config = build_app_config();
+
+        assert_eq!(config.default_tax_year, 2025);
+        assert_eq!(config.supported_tax_years.len(), 1);
+        assert_eq!(config.supported_tax_years[0].tax_year, 2025);
+        assert!(config.supported_tax_years[0].available);
     }
 
     #[test]
@@ -489,6 +633,38 @@ mod tests {
         assert!(review.ready_for_estimate);
         assert_eq!(review.status, "ready");
         assert!(review.blocking_issues.is_empty());
+    }
+
+    #[test]
+    fn compute_tax_reports_unsupported_tax_year_when_no_embedded_pack_exists() {
+        let json = include_str!("../../../tests/golden_vectors/single_w2_60k.json")
+            .replace("\"tax_year\": 2025", "\"tax_year\": 2024");
+        let result = compute_tax_inner(&json);
+
+        assert!(!result.success);
+        assert!(result
+            .error
+            .as_deref()
+            .is_some_and(|error| error.contains("tax year 2024")));
+        assert!(result
+            .error
+            .as_deref()
+            .is_some_and(|error| error.contains("2025")));
+    }
+
+    #[test]
+    fn review_tax_input_reports_unsupported_tax_year_when_no_embedded_pack_exists() {
+        let json = include_str!("../../../tests/golden_vectors/single_w2_60k.json")
+            .replace("\"tax_year\": 2025", "\"tax_year\": 2024");
+        let review = review_tax_input_inner(&json);
+
+        assert!(!review.ready_for_estimate);
+        assert_eq!(review.status, "unsupported");
+        assert!(review.summary.contains("tax year 2024"));
+        assert!(review
+            .blocking_issues
+            .iter()
+            .any(|issue| issue.contains("2025")));
     }
 
     #[test]
