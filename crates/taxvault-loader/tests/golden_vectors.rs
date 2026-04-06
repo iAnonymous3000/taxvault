@@ -381,6 +381,36 @@ fn single_w2_qualified_dividends_zero_rate_threshold() {
 }
 
 #[test]
+fn mfj_w2_qualified_dividends_zero_rate_threshold() {
+    let json = include_str!(
+        "../../../tests/golden_vectors/mfj_w2_qualified_dividends_zero_rate_threshold.json"
+    );
+    let (result, expected) = run_vector(json);
+
+    assert_basic_fields(&expected, &result);
+    assert_field(
+        &expected,
+        "child_dependent_credit",
+        result.child_dependent_credit,
+    );
+    assert_field(
+        &expected,
+        "additional_child_tax_credit",
+        result.additional_child_tax_credit,
+    );
+
+    let form = taxvault_forms::compile_1040(&result);
+    assert_eq!(
+        form.lines["3a"],
+        taxvault_forms::FormLineValue::Currency(Decimal::from(30000))
+    );
+    assert_eq!(
+        form.lines["3b"],
+        taxvault_forms::FormLineValue::Currency(Decimal::from(30000))
+    );
+}
+
+#[test]
 fn single_w2_qualified_dividends_twenty_rate_threshold() {
     let json = include_str!(
         "../../../tests/golden_vectors/single_w2_qualified_dividends_twenty_rate_threshold.json"
@@ -407,6 +437,37 @@ fn single_w2_qualified_dividends_twenty_rate_threshold() {
     assert_eq!(
         form.lines["3b"],
         taxvault_forms::FormLineValue::Currency(Decimal::from(400000))
+    );
+}
+
+#[test]
+fn single_w2_student_loan_interest_2500() {
+    let json =
+        include_str!("../../../tests/golden_vectors/single_w2_student_loan_interest_2500.json");
+    let (result, expected) = run_vector(json);
+
+    assert_basic_fields(&expected, &result);
+    assert_field(
+        &expected,
+        "child_dependent_credit",
+        result.child_dependent_credit,
+    );
+    assert_field(
+        &expected,
+        "additional_child_tax_credit",
+        result.additional_child_tax_credit,
+    );
+    assert_eq!(result.student_loan_interest_deduction, Decimal::from(2500));
+    assert_eq!(result.total_adjustments, Decimal::from(2500));
+
+    let form = taxvault_forms::compile_1040(&result);
+    assert_eq!(
+        form.lines["10"],
+        taxvault_forms::FormLineValue::Currency(Decimal::from(2500))
+    );
+    assert_eq!(
+        form.lines["11b"],
+        taxvault_forms::FormLineValue::Currency(Decimal::from(57500))
     );
 }
 

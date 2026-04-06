@@ -1,0 +1,65 @@
+{
+  "metadata": {
+    "description": "MFJ filer, one W-2 plus qualified dividends crossing the 0% capital gain threshold",
+    "source": "2025 Form 1040 Instructions, Qualified Dividends and Capital Gain Tax Worksheet (line 16), plus 2025 IRS Tax Table rows for MFJ taxable income of $68,500 and $98,500",
+    "verified_against_published_table": true,
+    "expected_tax_value": 8016
+  },
+  "input": {
+    "tax_year": 2025,
+    "filing_status": "married_filing_jointly",
+    "primary_filer": {
+      "first_name": "Jordan",
+      "last_name": "Threshold",
+      "ssn": "400-09-1009",
+      "date_of_birth": "1989-03-18",
+      "is_blind": false,
+      "is_dependent": false
+    },
+    "spouse": {
+      "first_name": "Taylor",
+      "last_name": "Threshold",
+      "ssn": "400-09-1010",
+      "date_of_birth": "1990-07-22",
+      "is_blind": false,
+      "is_dependent": false
+    },
+    "w2_income": [
+      {
+        "recipient": "primary",
+        "employer_name": "Threshold Labs",
+        "employer_ein": "66-6666661",
+        "wages": 100000,
+        "federal_tax_withheld": 9000,
+        "state_tax_withheld": 3500,
+        "social_security_wages": 100000,
+        "social_security_tax_withheld": 6200,
+        "medicare_wages": 100000,
+        "medicare_tax_withheld": 1450
+      }
+    ],
+    "dividend_income": [
+      {
+        "recipient": "primary",
+        "payer_name": "North Harbor Brokerage",
+        "ordinary_dividends": 30000,
+        "qualified_dividends": 30000
+      }
+    ]
+  },
+  "expected": {
+    "total_wages": 100000,
+    "total_income": 130000,
+    "adjusted_gross_income": 130000,
+    "standard_deduction": 31500,
+    "taxable_income": 98500,
+    "income_tax": 8016,
+    "child_dependent_credit": 0,
+    "additional_child_tax_credit": 0,
+    "total_tax": 8016,
+    "total_federal_withholding": 9000,
+    "total_payments": 9000,
+    "overpayment": 984,
+    "balance_due": 0
+  }
+}

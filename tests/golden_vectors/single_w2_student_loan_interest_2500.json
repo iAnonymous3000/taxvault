@@ -1,0 +1,53 @@
+{
+  "metadata": {
+    "description": "Single filer, one W-2, and a fully deductible student loan interest adjustment",
+    "source": "2025 Form 1040 Instructions for line 10 student loan interest deduction and 2025 IRS Tax Table, single column, $41,750 row",
+    "verified_against_published_table": true,
+    "expected_tax_value": 4775
+  },
+  "input": {
+    "tax_year": 2025,
+    "filing_status": "single",
+    "primary_filer": {
+      "first_name": "Taylor",
+      "last_name": "Borrower",
+      "ssn": "400-10-0010",
+      "date_of_birth": "1992-04-10",
+      "is_blind": false,
+      "is_dependent": false
+    },
+    "spouse": null,
+    "w2_income": [
+      {
+        "recipient": "primary",
+        "employer_name": "Loan Servicing Co",
+        "employer_ein": "12-3456789",
+        "wages": 60000,
+        "federal_tax_withheld": 8000,
+        "state_tax_withheld": 3000,
+        "social_security_wages": 60000,
+        "social_security_tax_withheld": 3720,
+        "medicare_wages": 60000,
+        "medicare_tax_withheld": 870
+      }
+    ],
+    "adjustments": {
+      "student_loan_interest_paid": 2500
+    }
+  },
+  "expected": {
+    "total_wages": 60000,
+    "total_income": 60000,
+    "adjusted_gross_income": 57500,
+    "standard_deduction": 15750,
+    "taxable_income": 41750,
+    "income_tax": 4775,
+    "child_dependent_credit": 0,
+    "additional_child_tax_credit": 0,
+    "total_tax": 4775,
+    "total_federal_withholding": 8000,
+    "total_payments": 8000,
+    "overpayment": 3225,
+    "balance_due": 0
+  }
+}

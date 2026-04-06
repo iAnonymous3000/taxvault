@@ -25,6 +25,7 @@ Do not use it to file a return, sign a tax document, or decide how much to pay t
 - Guided manual entry helpers for supported paper forms
 - Multiple local PDF/image reference uploads per supported form card for on-screen review
 - Draft Form 1040 preview with browser print/save-PDF export for local review
+- Anonymized support snapshot export for bug reports without names, dates of birth, SSNs, EINs, or issuer names
 - Browser-only execution for the web app
 
 ## What The App Does Not Support
@@ -123,6 +124,7 @@ They currently cover:
 - pre-compute unsupported-case blocking for Additional Medicare Tax
 - Head of Household manual-review cautions alongside machine-check trust warnings
 - legacy draft restore with SSN and EIN redaction
+- support snapshot export redaction for shareable debugging artifacts
 - printable draft Form 1040 preview rendering
 
 To run them locally:

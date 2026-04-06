@@ -47,6 +47,10 @@ class StaticWebServer:
     def url(self) -> str:
         return f"http://127.0.0.1:{self.port}/index.html"
 
+    @property
+    def testing_url(self) -> str:
+        return f"{self.url}?taxvaultTesting=1"
+
     def start(self) -> None:
         self._thread.start()
 
@@ -318,7 +322,7 @@ class WebSmokeTests(unittest.TestCase):
         self.browser.close()
 
     def open_app(self):
-        self.browser.navigate(self.server.url)
+        self.browser.navigate(self.server.testing_url)
         self.browser.wait_for(
             lambda: self.browser.class_list_contains("#loading", "hidden"),
             "app never finished loading",
@@ -478,6 +482,23 @@ class WebSmokeTests(unittest.TestCase):
         self.assertTrue(any("machine-checked" in item for item in cautions))
         self.assertFalse(self.browser.is_disabled("#computeBtn"))
 
+    def test_testing_hooks_stay_hidden_without_loopback_query_flag(self):
+        self.browser.navigate(self.server.url)
+        self.browser.wait_for(
+            lambda: self.browser.class_list_contains("#loading", "hidden"),
+            "app never finished loading on the plain URL",
+        )
+        self.assertFalse(
+            self.browser.execute("return Object.prototype.hasOwnProperty.call(window, '__taxvaultTesting');")
+        )
+
+        self.browser.navigate(self.server.testing_url)
+        self.browser.wait_for(
+            lambda: self.browser.class_list_contains("#loading", "hidden"),
+            "app never finished loading on the testing URL",
+        )
+        self.assertTrue(self.browser.execute("return Boolean(window.__taxvaultTesting);"))
+
     def test_estimate_year_selector_reflects_embedded_runtime_config(self):
         self.open_app()
 
@@ -610,6 +631,52 @@ class WebSmokeTests(unittest.TestCase):
         audit_raw = json.dumps(audit_trail)
         self.assertNotIn("400-01-0001", audit_raw)
         self.assertNotIn("12-3456789", audit_raw)
+
+    def test_support_snapshot_export_redacts_names_birth_dates_and_issuer_identities(self):
+        self.open_app()
+        self.fill_step1_single()
+        self.add_supported_w2()
+        self.browser.click("#addInterestBtn")
+        self.browser.set_value("#int-1-payer", "Redwood Credit Union")
+        self.browser.set_value("#int-1-taxable", "125")
+        self.browser.set_value("#int-1-tax-exempt", "50")
+
+        self.wait_for_ready_review()
+        self.browser.click("#computeBtn")
+        self.browser.wait_for(
+            lambda: self.browser.class_list_contains("#step3", "active"),
+            "step 3 never became active after compute",
+        )
+        self.assertFalse(self.browser.is_disabled("#exportSupportSnapshotBtn"))
+
+        support_snapshot = self.browser.execute(
+            """
+            return window.__taxvaultTesting
+              ? window.__taxvaultTesting.exportCurrentSupportSnapshot()
+              : null;
+            """
+        )
+        self.assertIsNotNone(support_snapshot)
+        self.assertEqual(support_snapshot["type"], "taxvault-support-snapshot")
+        self.assertEqual(support_snapshot["version"], 1)
+        self.assertEqual(support_snapshot["taxYear"], 2025)
+        self.assertTrue(support_snapshot["suitableForSharing"])
+        self.assertEqual(support_snapshot["inputSnapshot"]["primaryFiler"]["firstName"], "")
+        self.assertEqual(support_snapshot["inputSnapshot"]["primaryFiler"]["lastName"], "")
+        self.assertEqual(support_snapshot["inputSnapshot"]["primaryFiler"]["dob"], "")
+        self.assertEqual(support_snapshot["inputSnapshot"]["primaryFiler"]["ageOnTaxYearEnd"], 35)
+        self.assertEqual(support_snapshot["inputSnapshot"]["w2s"][0]["employerName"], "")
+        self.assertEqual(support_snapshot["inputSnapshot"]["interestIncome"][0]["payerName"], "")
+        self.assertEqual(support_snapshot["estimate"]["form"]["formId"], "1040")
+
+        support_raw = json.dumps(support_snapshot)
+        self.assertNotIn("Alex", support_raw)
+        self.assertNotIn("Filer", support_raw)
+        self.assertNotIn("1990-06-15", support_raw)
+        self.assertNotIn("Northwind Co", support_raw)
+        self.assertNotIn("Redwood Credit Union", support_raw)
+        self.assertNotIn("400-01-0001", support_raw)
+        self.assertNotIn("12-3456789", support_raw)
 
     def test_review_packet_export_renders_a_readable_redacted_html_packet(self):
         self.open_app()

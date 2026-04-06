@@ -5,6 +5,7 @@ const { test, expect } = require("@playwright/test");
 
 const ROOT = path.resolve(__dirname, "..", "..");
 const WASM_BUNDLE_PATH = path.join(ROOT, "web", "pkg", "taxvault_wasm.js");
+const TESTING_QUERY = "?taxvaultTesting=1";
 
 const mockResult = {
   summary: {
@@ -129,19 +130,112 @@ const legacySnapshot = {
   dividendIncome: [],
 };
 
+const richImportEnvelope = {
+  type: "taxvault-draft",
+  version: 2,
+  appVersion: "0.1.0",
+  taxYear: 2025,
+  piiRedacted: true,
+  createdAt: "2026-04-05T12:00:00.000Z",
+  updatedAt: "2026-04-05T12:05:00.000Z",
+  draft: {
+    savedAt: "2026-04-05T12:05:00.000Z",
+    filingStatus: "single",
+    currentStep: 2,
+    hadResults: false,
+    primaryFiler: {
+      firstName: "Jordan",
+      lastName: "Importer",
+      ssn: "",
+      dob: "1990-06-15",
+      isBlind: false,
+    },
+    spouse: {
+      firstName: "",
+      lastName: "",
+      ssn: "",
+      dob: "",
+      isBlind: false,
+    },
+    adjustments: {
+      traditionalIraDeduction: "",
+      hsaDeduction: "",
+      studentLoanInterestPaid: "",
+    },
+    dependents: [
+      {
+        firstName: "Mia",
+        lastName: "Importer",
+        ssn: "",
+        dob: "2018-04-11",
+        relationship: "daughter",
+        monthsLivedInHome: "12",
+      },
+    ],
+    w2s: [
+      {
+        employerName: "Imported W2 Corp",
+        recipient: "primary",
+        employerEin: "",
+        federalTaxWithheld: "4500",
+        wages: "40000",
+        stateTaxWithheld: "0",
+        socialSecurityWages: "40000",
+        socialSecurityTaxWithheld: "2480",
+        medicareWages: "40000",
+        medicareTaxWithheld: "580",
+        advancedOpen: false,
+      },
+    ],
+    socialSecurityIncome: [
+      {
+        recipient: "primary",
+        totalBenefits: "12000",
+        voluntaryWithholding: "600",
+      },
+    ],
+    interestIncome: [
+      {
+        payerName: "Imported Credit Union",
+        recipient: "primary",
+        taxableInterest: "125",
+        taxExemptInterest: "50",
+      },
+    ],
+    dividendIncome: [
+      {
+        payerName: "Imported Brokerage",
+        recipient: "primary",
+        ordinaryDividends: "300",
+        qualifiedDividends: "150",
+      },
+    ],
+  },
+};
+
 test.beforeAll(() => {
   if (!fs.existsSync(WASM_BUNDLE_PATH)) {
     throw new Error("web/pkg is missing. Rebuild the WASM bundle before running browser smoke tests.");
   }
 });
 
-async function waitForAppToLoad(page) {
-  await page.goto("/index.html");
+test("testing hooks stay hidden unless explicitly enabled on loopback", async ({ page }) => {
+  await waitForAppToLoad(page, { enableTestingHooks: false });
+  expect(
+    await page.evaluate(() => Object.prototype.hasOwnProperty.call(window, "__taxvaultTesting"))
+  ).toBe(false);
+
+  await waitForAppToLoad(page, { enableTestingHooks: true });
+  expect(await page.evaluate(() => Boolean(window.__taxvaultTesting))).toBe(true);
+});
+
+async function waitForAppToLoad(page, { enableTestingHooks = true } = {}) {
+  await page.goto(enableTestingHooks ? `/index.html${TESTING_QUERY}` : "/index.html");
   await expect(page.locator("#loading")).toHaveClass(/hidden/);
 }
 
-async function openApp(page) {
-  await waitForAppToLoad(page);
+async function openApp(page, options) {
+  await waitForAppToLoad(page, options);
   await page.locator("#gateAcknowledge").check();
   await expect(page.locator("#gateContinueBtn")).toBeEnabled();
   await page.locator("#gateContinueBtn").click();
@@ -235,6 +329,17 @@ test("estimate year selector reflects the embedded runtime config", async ({ pag
   expect(runtimeConfig.supportedTaxYears).toHaveLength(1);
   expect(runtimeConfig.supportedTaxYears[0].taxYear).toBe(2025);
   expect(runtimeConfig.supportedTaxYears[0].available).toBe(true);
+});
+
+test("step indicator marks the active step with aria-current=step", async ({ page }) => {
+  await openApp(page);
+
+  await expect(page.locator("#lbl1")).toHaveAttribute("aria-current", "step");
+
+  await fillStep1Single(page);
+
+  expect(await page.locator("#lbl1").getAttribute("aria-current")).toBeNull();
+  await expect(page.locator("#lbl2")).toHaveAttribute("aria-current", "step");
 });
 
 test("unsupported return shows a blocking issue before compute", async ({ page }) => {
@@ -344,6 +449,50 @@ test("audit trail export captures sanitized input, review status, and computed o
   expect(auditRaw).not.toContain("12-3456789");
 });
 
+test("support snapshot export redacts names, birth dates, and issuer identities", async ({ page }) => {
+  await openApp(page);
+  await fillStep1Single(page);
+  await addSupportedW2(page);
+  await page.locator("#addInterestBtn").click();
+  await page.locator("#int-1-payer").fill("Redwood Credit Union");
+  await page.locator("#int-1-taxable").fill("125");
+  await page.locator("#int-1-tax-exempt").fill("50");
+
+  await waitForReadyReview(page);
+  await page.locator("#computeBtn").click();
+  await expect(page.locator("#step3")).toHaveClass(/active/);
+  await expect(page.locator("#exportSupportSnapshotBtn")).toBeEnabled();
+
+  const supportSnapshot = await page.evaluate(() => {
+    if (!window.__taxvaultTesting) {
+      return null;
+    }
+
+    return window.__taxvaultTesting.exportCurrentSupportSnapshot();
+  });
+  expect(supportSnapshot).not.toBeNull();
+  expect(supportSnapshot.type).toBe("taxvault-support-snapshot");
+  expect(supportSnapshot.version).toBe(1);
+  expect(supportSnapshot.taxYear).toBe(2025);
+  expect(supportSnapshot.suitableForSharing).toBe(true);
+  expect(supportSnapshot.inputSnapshot.primaryFiler.firstName).toBe("");
+  expect(supportSnapshot.inputSnapshot.primaryFiler.lastName).toBe("");
+  expect(supportSnapshot.inputSnapshot.primaryFiler.dob).toBe("");
+  expect(supportSnapshot.inputSnapshot.primaryFiler.ageOnTaxYearEnd).toBe(35);
+  expect(supportSnapshot.inputSnapshot.w2s[0].employerName).toBe("");
+  expect(supportSnapshot.inputSnapshot.interestIncome[0].payerName).toBe("");
+  expect(supportSnapshot.estimate.form.formId).toBe("1040");
+
+  const supportRaw = JSON.stringify(supportSnapshot);
+  expect(supportRaw).not.toContain("Alex");
+  expect(supportRaw).not.toContain("Filer");
+  expect(supportRaw).not.toContain("1990-06-15");
+  expect(supportRaw).not.toContain("Northwind Co");
+  expect(supportRaw).not.toContain("Redwood Credit Union");
+  expect(supportRaw).not.toContain("400-01-0001");
+  expect(supportRaw).not.toContain("12-3456789");
+});
+
 test("review packet export renders a readable redacted HTML packet", async ({ page }) => {
   await openApp(page);
   await fillStep1Single(page);
@@ -425,6 +574,56 @@ test("draft export and import round-trip through the versioned envelope", async 
   expect(storedDraft.type).toBe("taxvault-draft");
   expect(storedDraft.version).toBe(2);
   expect(storedDraft.taxYear).toBe(2025);
+});
+
+test("draft import replaces existing cards instead of duplicating them", async ({ page }) => {
+  await openApp(page);
+  await page.locator("#pFirst").fill("Alex");
+  await page.locator("#pLast").fill("Filer");
+  await page.locator("#pSsn").fill("400-01-0001");
+  await page.locator("#pDob").fill("1990-06-15");
+  await page.locator("#addDependentBtn").click();
+  await page.locator("#dep-1-first").fill("Casey");
+  await page.locator("#dep-1-last").fill("Filer");
+  await page.locator("#dep-1-ssn").fill("400-02-0002");
+  await page.locator("#dep-1-dob").fill("2017-05-20");
+  await page.locator("#dep-1-relationship").selectOption("daughter");
+  await page.locator("#dep-1-months").fill("12");
+  await page.locator("#step1ContinueBtn").click();
+  await expect(page.locator("#step2")).toHaveClass(/active/);
+
+  await addSupportedW2(page, "61000");
+  await page.locator("#addSocialSecurityBtn").click();
+  await page.locator("#ssa-1-benefits").fill("18000");
+  await page.locator("#ssa-1-withholding").fill("500");
+  await page.locator("#addInterestBtn").click();
+  await page.locator("#int-1-payer").fill("Existing Bank");
+  await page.locator("#int-1-taxable").fill("25");
+  await page.locator("#addDividendBtn").click();
+  await page.locator("#div-1-payer").fill("Existing Brokerage");
+  await page.locator("#div-1-ordinary").fill("40");
+  await page.locator("#div-1-qualified").fill("20");
+
+  const imported = await page.evaluate((envelope) => {
+    if (!window.__taxvaultTesting) {
+      return false;
+    }
+
+    return window.__taxvaultTesting.importDraftValue(envelope).ok;
+  }, richImportEnvelope);
+  expect(imported).toBe(true);
+
+  await expect(page.locator("#dependentContainer > .dependent-card")).toHaveCount(1);
+  await expect(page.locator("#w2Container > .w2-card")).toHaveCount(1);
+  await expect(page.locator("#socialSecurityContainer > .ssa-card")).toHaveCount(1);
+  await expect(page.locator("#interestContainer > .interest-card")).toHaveCount(1);
+  await expect(page.locator("#dividendContainer > .dividend-card")).toHaveCount(1);
+  await expect(page.locator("#pFirst")).toHaveValue("Jordan");
+  await expect(page.locator("#dep-1-first")).toHaveValue("Mia");
+  await expect(page.locator("#w2-1-employer")).toHaveValue("Imported W2 Corp");
+  await expect(page.locator("#ssa-1-benefits")).toHaveValue("12000");
+  await expect(page.locator("#int-1-payer")).toHaveValue("Imported Credit Union");
+  await expect(page.locator("#div-1-payer")).toHaveValue("Imported Brokerage");
 });
 
 test("legacy saved draft restores without SSNs or EINs", async ({ page }) => {
