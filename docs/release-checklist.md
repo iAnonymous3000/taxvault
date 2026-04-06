@@ -18,11 +18,16 @@ Use this checklist for any public estimate release.
 
 ## Verification Commands
 
+- Run `npm ci`
 - Run `cargo fmt --all --check`
 - Run `cargo clippy --workspace --all-targets --all-features -- -D warnings`
 - Run `cargo test --workspace`
 - Run `python3 -m unittest discover -s tests -p 'test_*.py'`
-- Run browser smoke tests against the release build
+- Run `npm run check:web-js`
+- Run `python3 scripts/verify_tax_table.py --report --check`
+- Run `cd crates/taxvault-wasm && wasm-pack build --target web --out-dir ../../web/pkg --release`
+- Run `npx playwright install chromium`
+- Run `npm run test:web-smoke`
 
 ## Release Approval
 

@@ -1,7 +1,11 @@
 name: Deploy Pages
 
 on:
-  push:
+  workflow_run:
+    workflows:
+      - CI
+    types:
+      - completed
     branches:
       - main
   workflow_dispatch:
@@ -17,16 +21,29 @@ concurrency:
 
 jobs:
   build:
+    if: |
+      (github.event_name == 'workflow_run' && github.event.workflow_run.conclusion == 'success') ||
+      (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main')
     runs-on: ubuntu-latest
 
     steps:
-      - name: Checkout
+      - name: Checkout dispatched ref
         uses: actions/checkout@v4
+        if: github.event_name == 'workflow_dispatch'
+
+      - name: Checkout CI commit
+        uses: actions/checkout@v4
+        if: github.event_name == 'workflow_run'
+        with:
+          ref: ${{ github.event.workflow_run.head_sha }}
 
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
         with:
           targets: wasm32-unknown-unknown
+
+      - name: Cache Rust artifacts
+        uses: Swatinem/rust-cache@v2
 
       - name: Install wasm-pack
         run: cargo install --locked wasm-pack

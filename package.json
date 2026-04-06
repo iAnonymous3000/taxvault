@@ -1,0 +1,15 @@
+{
+  "name": "taxvault",
+  "private": true,
+  "description": "Release hardening and browser smoke tests for the Tax Vault static app.",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "check:web-js": "node --check web/app.js",
+    "test:web-smoke": "playwright test"
+  },
+  "devDependencies": {
+    "@playwright/test": "1.59.1"
+  }
+}
