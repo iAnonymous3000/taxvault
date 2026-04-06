@@ -70,6 +70,7 @@ There is currently no OCR/import flow for local PDFs or images and no cloud docu
 ## Prerequisites
 
 - Rust `1.94.1` or newer
+- Node.js `22` or newer plus npm
 - `wasm-pack 0.14+` for rebuilding the browser bundle
 - A local static file server such as `python3 -m http.server`
 
@@ -78,15 +79,19 @@ There is currently no OCR/import flow for local PDFs or images and no cloud docu
 Run the full verification flow from the workspace root:
 
 ```sh
+npm ci
 cargo fmt --all --check
 cargo clippy --workspace --all-targets --all-features -- -D warnings
 cargo test --workspace
 python3 -m unittest discover -s tests -p 'test_*.py'
-node --check web/app.js
+npm run check:web-js
 python3 scripts/verify_tax_table.py --report --check
+(cd crates/taxvault-wasm && wasm-pack build --target web --out-dir ../../web/pkg --release)
+npx playwright install chromium
+npm run test:web-smoke
 ```
 
-`node --check web/app.js` requires Node.js on your PATH. CI runs this step on every push; the Python suite includes the same check and skips it when `node` is not installed locally.
+`npm ci` installs the Playwright test runner used for browser smoke coverage. `npx playwright install chromium` only needs to be repeated when the Playwright version changes or your local browser cache is cleared.
 
 ## Rebuild The Web Bundle
 
@@ -110,25 +115,28 @@ Then open [http://localhost:8000](http://localhost:8000).
 
 ## Run Browser Smoke Tests
 
-Tax Vault includes Safari-based smoke tests for the browser flow in `tests/web_smoke.py`.
+Tax Vault includes Playwright smoke tests for the browser flow in `tests/playwright/smoke.spec.js`.
 
 They currently cover:
 
 - the disclaimer gate and supported W-2 readiness when the tax table is machine-checked
 - pre-compute unsupported-case blocking for Additional Medicare Tax
 - Head of Household manual-review cautions alongside machine-check trust warnings
+- legacy draft restore with SSN and EIN redaction
+- printable draft Form 1040 preview rendering
 
-To run them locally on macOS:
+To run them locally:
 
 ```sh
-sudo safaridriver --enable
+npm ci
+npx playwright install chromium
 cd crates/taxvault-wasm
 wasm-pack build --target web --out-dir ../../web/pkg --release
 cd ../..
-python3 tests/web_smoke.py
+npm run test:web-smoke
 ```
 
-Safari's `Allow remote automation` setting must be enabled for WebDriver control.
+The Playwright runner starts a local static server automatically and exercises the built `web/` bundle in Chromium.
 
 ## Critical Software Controls
 
@@ -154,6 +162,8 @@ To use it:
 2. Set `Source` to `GitHub Actions`
 3. Push to `main`
 4. Wait for the `Deploy Pages` workflow to finish
+
+The deploy workflow now runs after the `CI` workflow succeeds on `main`, so the published Pages artifact tracks the exact commit that passed automated checks.
 
 The site will usually be published at:
 

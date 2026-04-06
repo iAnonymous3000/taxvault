@@ -29,7 +29,7 @@ Use this runbook if a released build is found to have a tax logic, rule-pack, or
 
 1. Apply the fix.
 2. Re-run the full verification flow.
-3. Re-run browser smoke tests.
+3. Re-run Playwright browser smoke tests.
 4. Re-complete `docs/release-checklist.md`.
 5. Record the new deployed commit and approver.
 

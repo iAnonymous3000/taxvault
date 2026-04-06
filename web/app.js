@@ -5,7 +5,6 @@ const EIN_PATTERN = /^\d{2}-\d{7}$/;
 const FOCUSABLE_SELECTOR =
   'a[href], button:not([disabled]), input:not([disabled]):not([type="hidden"]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])';
 const DATE_INPUT_MIN = "1900-01-01";
-const DATE_INPUT_MAX = todayIsoDate();
 const currencyFormatter = new Intl.NumberFormat("en-US", {
   style: "currency",
   currency: "USD",
@@ -583,7 +582,7 @@ function applyDateConstraints(root) {
 
   root.querySelectorAll('input[type="date"][data-date-kind="dob"]').forEach((input) => {
     input.setAttribute("min", DATE_INPUT_MIN);
-    input.setAttribute("max", DATE_INPUT_MAX);
+    input.setAttribute("max", todayIsoDate());
   });
 }
 
@@ -663,13 +662,13 @@ function captureDraftSnapshot() {
         voluntaryWithholding: card.querySelector(".ssa-withholding").value.trim(),
       })
     ),
-    interestIncome: Array.from(els.interestContainer.querySelectorAll(".w2-card")).map((card) => ({
+    interestIncome: Array.from(els.interestContainer.querySelectorAll(".interest-card")).map((card) => ({
       payerName: card.querySelector(".interest-payer").value.trim(),
       recipient: card.querySelector(".interest-recipient").value,
       taxableInterest: card.querySelector(".interest-taxable").value.trim(),
       taxExemptInterest: card.querySelector(".interest-tax-exempt").value.trim(),
     })),
-    dividendIncome: Array.from(els.dividendContainer.querySelectorAll(".w2-card")).map((card) => ({
+    dividendIncome: Array.from(els.dividendContainer.querySelectorAll(".dividend-card")).map((card) => ({
       payerName: card.querySelector(".dividend-payer").value.trim(),
       recipient: card.querySelector(".dividend-recipient").value,
       ordinaryDividends: card.querySelector(".dividend-ordinary").value.trim(),
@@ -680,7 +679,7 @@ function captureDraftSnapshot() {
 
 function stripPiiFromSnapshot(snapshot) {
   const redactFiler = (filer) => {
-    if (!filer) {
+    if (!filer || typeof filer !== "object" || Array.isArray(filer)) {
       return filer;
     }
     const copy = { ...filer };
@@ -688,20 +687,36 @@ function stripPiiFromSnapshot(snapshot) {
     return copy;
   };
 
+  const redactDependent = (dep) => {
+    if (!dep || typeof dep !== "object" || Array.isArray(dep)) {
+      return dep;
+    }
+    const copy = { ...dep };
+    delete copy.ssn;
+    return copy;
+  };
+
+  const redactW2 = (w2) => {
+    if (!w2 || typeof w2 !== "object" || Array.isArray(w2)) {
+      return w2;
+    }
+    const copy = { ...w2 };
+    delete copy.employerEin;
+    return copy;
+  };
+
   return {
     ...snapshot,
     primaryFiler: redactFiler(snapshot.primaryFiler),
     spouse: redactFiler(snapshot.spouse),
-    dependents: (snapshot.dependents || []).map((dep) => {
-      const copy = { ...dep };
-      delete copy.ssn;
-      return copy;
-    }),
-    w2s: (snapshot.w2s || []).map((w2) => {
-      const copy = { ...w2 };
-      delete copy.employerEin;
-      return copy;
-    }),
+    dependents: Array.isArray(snapshot.dependents)
+      ? snapshot.dependents
+          .map(redactDependent)
+          .filter((dep) => dep && typeof dep === "object" && !Array.isArray(dep))
+      : [],
+    w2s: Array.isArray(snapshot.w2s)
+      ? snapshot.w2s.map(redactW2).filter((w2) => w2 && typeof w2 === "object" && !Array.isArray(w2))
+      : [],
   };
 }
 
@@ -1041,7 +1056,8 @@ function applyDraftSnapshot(snapshot) {
     draftRestoreInProgress = false;
   }
 
-  const nextStep = snapshot.currentStep === 2 && validateStep1().length === 0 ? 2 : 1;
+  const step1Validation = validateStep1();
+  const nextStep = snapshot.currentStep === 2 && step1Validation.messages.length === 0 ? 2 : 1;
   goToStep(nextStep);
   hideError();
 }
@@ -1315,9 +1331,9 @@ function updateDependentSubtitle(isHoh) {
 
 function goToStep(step) {
   if (step === 2 && state.currentStep === 1) {
-    const errors = validateStep1();
-    if (errors.length > 0) {
-      showError(errors);
+    const validation = validateStep1();
+    if (validation.messages.length > 0) {
+      showError(validation.messages, validation.fieldErrors);
       return;
     }
   }
@@ -1370,31 +1386,31 @@ function updateStepIndicator() {
 }
 
 function validateStep1() {
-  const errors = [];
+  const messages = [];
   const fieldErrors = [];
   const primary = readFilerInputs("p");
   let spouse = null;
 
   if (!primary.firstName) {
-    errors.push("First name is required.");
+    messages.push("First name is required.");
     fieldErrors.push({ id: "pFirst", msg: "Required" });
   }
   if (!primary.lastName) {
-    errors.push("Last name is required.");
+    messages.push("Last name is required.");
     fieldErrors.push({ id: "pLast", msg: "Required" });
   }
   if (!primary.ssn) {
-    errors.push("SSN is required.");
+    messages.push("SSN is required.");
     fieldErrors.push({ id: "pSsn", msg: "Required" });
   } else if (!SSN_PATTERN.test(primary.ssn)) {
-    errors.push("SSN must use the format 123-45-6789.");
+    messages.push("SSN must use the format 123-45-6789.");
     fieldErrors.push({ id: "pSsn", msg: "Format: 123-45-6789" });
   }
   if (!primary.dob) {
-    errors.push("Date of birth is required.");
+    messages.push("Date of birth is required.");
     fieldErrors.push({ id: "pDob", msg: "Required" });
   } else if (!isPastOrToday(primary.dob)) {
-    errors.push("Date of birth must be a real date in the past.");
+    messages.push("Date of birth must be a real date in the past.");
     fieldErrors.push({ id: "pDob", msg: "Must be a past date" });
   }
 
@@ -1402,36 +1418,35 @@ function validateStep1() {
     spouse = readFilerInputs("s");
 
     if (!spouse.firstName) {
-      errors.push("Spouse first name is required.");
+      messages.push("Spouse first name is required.");
       fieldErrors.push({ id: "sFirst", msg: "Required" });
     }
     if (!spouse.lastName) {
-      errors.push("Spouse last name is required.");
+      messages.push("Spouse last name is required.");
       fieldErrors.push({ id: "sLast", msg: "Required" });
     }
     if (!spouse.ssn) {
-      errors.push("Spouse SSN is required.");
+      messages.push("Spouse SSN is required.");
       fieldErrors.push({ id: "sSsn", msg: "Required" });
     } else if (!SSN_PATTERN.test(spouse.ssn)) {
-      errors.push("Spouse SSN must use the format 123-45-6789.");
+      messages.push("Spouse SSN must use the format 123-45-6789.");
       fieldErrors.push({ id: "sSsn", msg: "Format: 123-45-6789" });
     }
     if (!spouse.dob) {
-      errors.push("Spouse date of birth is required.");
+      messages.push("Spouse date of birth is required.");
       fieldErrors.push({ id: "sDob", msg: "Required" });
     } else if (!isPastOrToday(spouse.dob)) {
-      errors.push("Spouse date of birth must be a real date in the past.");
+      messages.push("Spouse date of birth must be a real date in the past.");
       fieldErrors.push({ id: "sDob", msg: "Must be a past date" });
     }
   }
 
-  const dependents = collectDependents(errors, {
+  const dependents = collectDependents(messages, {
     requireAtLeastOne: state.filingStatus === "head_of_household",
   });
-  validateUniqueSsnEntries(errors, primary, spouse, dependents);
+  validateUniqueSsnEntries(messages, primary, spouse, dependents);
 
-  errors.fieldErrors = fieldErrors;
-  return errors;
+  return { messages, fieldErrors };
 }
 
 function readFilerInputs(prefix) {
@@ -1444,7 +1459,7 @@ function readFilerInputs(prefix) {
   };
 }
 
-function showError(messages) {
+function showError(messages, fieldErrors = []) {
   const content = Array.isArray(messages) ? messages.join("\n") : String(messages);
   els.error.textContent = content;
   els.error.hidden = false;
@@ -1454,10 +1469,9 @@ function showError(messages) {
 
   clearFieldErrors();
 
-  const fieldErrors = Array.isArray(messages) ? messages.fieldErrors : undefined;
   let firstInvalid = null;
 
-  if (fieldErrors && fieldErrors.length > 0) {
+  if (Array.isArray(fieldErrors) && fieldErrors.length > 0) {
     for (const { id, msg } of fieldErrors) {
       const input = document.getElementById(id);
       if (!input) {
@@ -1870,7 +1884,7 @@ function addInterest({ focusNewCard = true } = {}) {
 
   state.interestCount += 1;
   const idPrefix = `int-${state.interestCount}`;
-  const card = createCardSection("w2-card", state.interestCount);
+  const card = createCardSection("w2-card interest-card", state.interestCount);
   card.append(
     createCardHeader(`1099-INT #${state.interestCount}`, "remove-interest-btn"),
     createReferenceZone("1099-INT"),
@@ -1934,7 +1948,7 @@ function addDividend({ focusNewCard = true } = {}) {
 
   state.dividendCount += 1;
   const idPrefix = `div-${state.dividendCount}`;
-  const card = createCardSection("w2-card", state.dividendCount);
+  const card = createCardSection("w2-card dividend-card", state.dividendCount);
   card.append(
     createCardHeader(`1099-DIV #${state.dividendCount}`, "remove-dividend-btn"),
     createReferenceZone("1099-DIV"),
@@ -2034,7 +2048,7 @@ function addDependent({ focusNewCard = true } = {}) {
           className: "dep-dob",
           type: "date",
           min: DATE_INPUT_MIN,
-          max: DATE_INPUT_MAX,
+          max: todayIsoDate(),
           attributes: { "data-date-kind": "dob" },
         })
       )
@@ -2146,7 +2160,7 @@ function updateRemoveButtons() {
 }
 
 function updateInterestRemoveButtons() {
-  const cards = Array.from(els.interestContainer.querySelectorAll(".w2-card"));
+  const cards = Array.from(els.interestContainer.querySelectorAll(".interest-card"));
   cards.forEach((card) => {
     const button = card.querySelector(".remove-interest-btn");
     button.disabled = false;
@@ -2155,7 +2169,7 @@ function updateInterestRemoveButtons() {
 }
 
 function updateSocialSecurityRemoveButtons() {
-  const cards = Array.from(els.socialSecurityContainer.querySelectorAll(".w2-card"));
+  const cards = Array.from(els.socialSecurityContainer.querySelectorAll(".ssa-card"));
   cards.forEach((card) => {
     const button = card.querySelector(".remove-ssa-btn");
     button.disabled = false;
@@ -2164,7 +2178,7 @@ function updateSocialSecurityRemoveButtons() {
 }
 
 function updateDividendRemoveButtons() {
-  const cards = Array.from(els.dividendContainer.querySelectorAll(".w2-card"));
+  const cards = Array.from(els.dividendContainer.querySelectorAll(".dividend-card"));
   cards.forEach((card) => {
     const button = card.querySelector(".remove-dividend-btn");
     button.disabled = false;
@@ -2379,10 +2393,10 @@ function computeReturn() {
     return;
   }
 
-  const step1Errors = validateStep1();
-  if (step1Errors.length > 0) {
+  const step1Validation = validateStep1();
+  if (step1Validation.messages.length > 0) {
     goToStep(1);
-    showError(step1Errors);
+    showError(step1Validation.messages, step1Validation.fieldErrors);
     return;
   }
 
@@ -2619,7 +2633,7 @@ function collectDependents(errors, { requireAtLeastOne = false } = {}) {
 
 function collectInterestCards(errors) {
   const interestIncome = [];
-  const cards = Array.from(els.interestContainer.querySelectorAll(".w2-card"));
+  const cards = Array.from(els.interestContainer.querySelectorAll(".interest-card"));
 
   cards.forEach((card, index) => {
     const payerName = card.querySelector(".interest-payer").value.trim();
@@ -2668,7 +2682,7 @@ function collectInterestCards(errors) {
 
 function collectSocialSecurityCards(errors) {
   const socialSecurityIncome = [];
-  const cards = Array.from(els.socialSecurityContainer.querySelectorAll(".w2-card"));
+  const cards = Array.from(els.socialSecurityContainer.querySelectorAll(".ssa-card"));
 
   cards.forEach((card, index) => {
     const rawBenefits = card.querySelector(".ssa-benefits").value.trim();
@@ -2714,7 +2728,7 @@ function collectSocialSecurityCards(errors) {
 
 function collectDividendCards(errors) {
   const dividendIncome = [];
-  const cards = Array.from(els.dividendContainer.querySelectorAll(".w2-card"));
+  const cards = Array.from(els.dividendContainer.querySelectorAll(".dividend-card"));
 
   cards.forEach((card, index) => {
     const payerName = card.querySelector(".dividend-payer").value.trim();

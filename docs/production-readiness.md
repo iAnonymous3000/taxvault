@@ -18,7 +18,7 @@ All items below must be true before a public estimate release:
 - `cargo fmt --all --check` passes.
 - `cargo clippy --workspace --all-targets --all-features -- -D warnings` passes.
 - `cargo test --workspace` passes.
-- Browser smoke tests pass against the release build.
+- Playwright Chromium smoke tests pass against the release build.
 - Unsupported scenarios are blocked before compute.
 - Release approver signs off on scope wording and disclaimer copy.
 - Release checklist in `docs/release-checklist.md` is completed.
