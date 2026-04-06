@@ -64,6 +64,7 @@ fn convert_tax_facts(dto: TaxFactsDto) -> Result<TaxFacts, LoaderError> {
         interest_income,
         dividend_income,
         social_security_income,
+        estimated_tax_payments: dto.estimated_tax_payments,
         adjustments,
     })
 }

@@ -18,6 +18,15 @@ pub enum PolicyError {
 
     #[error("Additional Medicare Tax (Form 8959) not supported: {reason}")]
     AdditionalMedicareTaxNotSupported { reason: String },
+
+    #[error("Head of Household scenario not supported for automated estimates: {reason}")]
+    HeadOfHouseholdNotSupported { reason: String },
+
+    #[error("Traditional IRA deduction estimates are not supported: TaxVault does not collect employer-plan coverage, spousal coverage, or annual contribution-limit details")]
+    TraditionalIraDeductionNotSupported,
+
+    #[error("HSA deduction estimates are not supported: TaxVault does not collect HDHP coverage, employer contributions, or excess-contribution details")]
+    HsaDeductionNotSupported,
 }
 
 #[derive(Debug, Error)]

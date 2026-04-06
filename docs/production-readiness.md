@@ -15,6 +15,7 @@ Reason:
 All items below must be true before a public estimate release:
 
 - `tax-table/federal_2025_table.csv` has `verification.status=human_verified` plus recorded review metadata.
+- The publish workflow fails closed until `python3 scripts/verify_tax_table.py --report --check --require-public-release-ready` passes.
 - `cargo fmt --all --check` passes.
 - `cargo clippy --workspace --all-targets --all-features -- -D warnings` passes.
 - `cargo test --workspace` passes.

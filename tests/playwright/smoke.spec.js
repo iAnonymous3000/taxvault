@@ -32,6 +32,7 @@ const mockResult = {
     additional_child_tax_credit: "0",
     total_w2_federal_withholding: "8000",
     total_social_security_withholding: "0",
+    estimated_tax_payments: "0",
     total_tax: "4681",
     total_federal_withholding: "8000",
     total_payments: "8000",
@@ -76,6 +77,7 @@ const mockResult = {
       "25a": { Currency: "8000" },
       "25b": { Currency: "0" },
       "25d": { Currency: "8000" },
+      "26": { Currency: "0" },
       "28": { Currency: "0" },
       "33": { Currency: "8000" },
       "34": { Currency: "3319" },
@@ -300,6 +302,34 @@ test("supported return becomes ready when the tax table allows local estimates",
   expect(cautions.some((item) => item.includes("machine-checked"))).toBe(true);
 });
 
+test("Ctrl+Enter calculates a ready return from step 2", async ({ page }) => {
+  await openApp(page);
+  await fillStep1Single(page);
+  await addSupportedW2(page);
+
+  await waitForReadyReview(page);
+  await page.keyboard.press("Control+Enter");
+  await expect(page.locator("#step3")).toHaveClass(/active/);
+});
+
+test("draft status shows the last saved time and clear fields resets a W-2 card", async ({ page }) => {
+  await openApp(page);
+  await fillStep1Single(page);
+  await addSupportedW2(page);
+
+  await expect(page.locator("#storageStatus")).toContainText("Last saved");
+  await page.locator(".clear-w2-btn").click();
+
+  await expect(page.locator("#w2-1-employer")).toHaveValue("");
+  await expect(page.locator("#w2-1-recipient")).toHaveValue("primary");
+  await expect(page.locator("#w2-1-ein")).toHaveValue("");
+  await expect(page.locator("#w2-1-wages")).toHaveValue("");
+  await expect(page.locator("#w2-1-fed-wh")).toHaveValue("");
+  await expect(page.locator("#w2-1-state-wh")).toHaveValue("");
+  await expect(page.locator("#w2-1-ss-wages")).not.toBeVisible();
+  await expect(page.locator("#storageStatus")).toContainText("Last saved");
+});
+
 test("landing page surfaces the public GitHub repo and privacy controls", async ({ page }) => {
   await openApp(page);
 
@@ -366,7 +396,7 @@ test("unsupported return shows a blocking issue before compute", async ({ page }
   await expect(page.locator("#computeBtn")).toBeDisabled();
 });
 
-test("Head of Household parent case surfaces manual review caution", async ({ page }) => {
+test("Head of Household parent case is blocked before compute", async ({ page }) => {
   await openApp(page);
   await page.locator('.status-option[data-status="head_of_household"]').click();
   await page.locator("#pFirst").fill("Alex");
@@ -383,16 +413,24 @@ test("Head of Household parent case surfaces manual review caution", async ({ pa
   await expect(page.locator("#step2")).toHaveClass(/active/);
 
   await addSupportedW2(page);
-  await waitForReadyReview(page);
+  await expect(page.locator("#supportReviewBadge")).toHaveText("Unsupported");
+  const issues = await page.locator("#supportReviewIssues li").allTextContents();
+  expect(issues.some((item) => item.includes("dependent parent"))).toBe(true);
+  await expect(page.locator("#computeBtn")).toBeDisabled();
+});
 
-  const cautions = await page.locator("#supportReviewCautions li").allTextContents();
-  expect(cautions.some((item) => item.includes("Head of Household is still a manual determination"))).toBe(
-    true
-  );
-  expect(cautions.some((item) => item.includes("does not automatically establish Head of Household"))).toBe(
-    true
-  );
-  expect(cautions.some((item) => item.includes("machine-checked"))).toBe(true);
+test("Traditional IRA deduction is blocked before compute", async ({ page }) => {
+  await openApp(page);
+  await fillStep1Single(page);
+  await addSupportedW2(page);
+
+  await page.locator("#traditionalIraDeduction").fill("1000");
+  await expect(page.locator("#supportReviewBadge")).toHaveText("Unsupported");
+  const issues = await page.locator("#supportReviewIssues li").allTextContents();
+  expect(
+    issues.some((item) => item.includes("Traditional IRA deduction estimates are not supported"))
+  ).toBe(true);
+  await expect(page.locator("#computeBtn")).toBeDisabled();
 });
 
 test("draft 1040 preview renders printable mock results", async ({ page }) => {

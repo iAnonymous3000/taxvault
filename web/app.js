@@ -104,6 +104,7 @@ const DRAFT_1040_SECTIONS = [
       { line: "25a", label: "W-2 federal income tax withheld" },
       { line: "25b", label: "SSA-1099 withholding" },
       { line: "25d", label: "Total federal income tax withheld" },
+      { line: "26", label: "Estimated tax payments" },
       { line: "28", label: "Additional child tax credit" },
       { line: "33", label: "Total payments", emphasis: true },
       { line: "34", label: "Estimated refund", emphasis: true },
@@ -131,6 +132,7 @@ const state = {
   supportedTaxYears: [],
   filingStatus: "single",
   draftEnvelopeCreatedAt: null,
+  lastDraftSavedAt: null,
   lastSupportReview: null,
   lastComputedResult: null,
   lastComputedDraftEnvelope: null,
@@ -159,6 +161,8 @@ const els = {
   importDraftInput: document.getElementById("importDraftInput"),
   rememberDraftToggle: document.getElementById("rememberDraftToggle"),
   storageStatus: document.getElementById("storageStatus"),
+  storageStatusText: document.getElementById("storageStatusText"),
+  storageStatusTimestamp: document.getElementById("storageStatusTimestamp"),
   storageTrustCopy: document.getElementById("storageTrustCopy"),
   uiStatus: document.getElementById("uiStatus"),
   incomeSummaryChips: document.getElementById("incomeSummaryChips"),
@@ -173,6 +177,7 @@ const els = {
   traditionalIraDeduction: document.getElementById("traditionalIraDeduction"),
   hsaDeduction: document.getElementById("hsaDeduction"),
   studentLoanInterestPaid: document.getElementById("studentLoanInterestPaid"),
+  estimatedTaxPayments: document.getElementById("estimatedTaxPayments"),
   computeBtn: document.getElementById("computeBtn"),
   computeHelp: document.getElementById("computeHelp"),
   supportReviewCard: document.getElementById("supportReviewCard"),
@@ -318,20 +323,55 @@ function getFocusableElements(root) {
 }
 
 function handleDocumentKeydown(event) {
-  if (els.disclaimerGate.classList.contains("hidden")) {
+  if (!els.disclaimerGate.classList.contains("hidden")) {
+    if (event.key === "Tab") {
+      trapGateFocus(event);
+      return;
+    }
+
+    if (event.key === "Escape") {
+      event.preventDefault();
+      announceUiStatus("Review and acknowledge the estimate warning before continuing.");
+      focusElement(els.gateAcknowledge);
+    }
+
     return;
   }
 
-  if (event.key === "Tab") {
-    trapGateFocus(event);
-    return;
-  }
-
-  if (event.key === "Escape") {
+  if (isComputeShortcut(event)) {
     event.preventDefault();
-    announceUiStatus("Review and acknowledge the estimate warning before continuing.");
-    focusElement(els.gateAcknowledge);
+    triggerComputeShortcut();
   }
+}
+
+function isComputeShortcut(event) {
+  if (event.defaultPrevented || event.isComposing) {
+    return false;
+  }
+
+  if (state.currentStep !== 2 || event.key !== "Enter") {
+    return false;
+  }
+
+  if (!(event.ctrlKey || event.metaKey) || event.altKey || event.shiftKey) {
+    return false;
+  }
+
+  const target = event.target instanceof Node ? event.target : document.activeElement;
+  return target === document.body || els.app.contains(target);
+}
+
+function triggerComputeShortcut() {
+  if (!els.computeBtn) {
+    return;
+  }
+
+  if (els.computeBtn.disabled) {
+    announceUiStatus(els.computeHelp?.textContent || "TaxVault is not ready to calculate this draft yet.");
+    return;
+  }
+
+  computeReturn();
 }
 
 function trapGateFocus(event) {
@@ -646,6 +686,36 @@ function rememberDraftEnabled() {
   return Boolean(els.rememberDraftToggle?.checked);
 }
 
+function setStorageStatusText(message) {
+  if (els.storageStatusText) {
+    els.storageStatusText.textContent = message;
+    return;
+  }
+
+  if (els.storageStatus) {
+    els.storageStatus.textContent = message;
+  }
+}
+
+function formatDraftSavedAtLabel(savedAt) {
+  const timestamp = typeof savedAt === "string" ? Date.parse(savedAt) : Number.NaN;
+  if (!Number.isFinite(timestamp)) {
+    return "";
+  }
+
+  return `Last saved ${draftTimestampFormatter.format(new Date(timestamp))}.`;
+}
+
+function updateStorageStatusTimestamp() {
+  if (!els.storageStatusTimestamp) {
+    return;
+  }
+
+  const label = formatDraftSavedAtLabel(state.lastDraftSavedAt);
+  els.storageStatusTimestamp.textContent = label;
+  els.storageStatusTimestamp.classList.toggle("hidden", label === "");
+}
+
 function restoreDraftPreference() {
   if (!els.rememberDraftToggle) {
     return;
@@ -688,14 +758,18 @@ function refreshStorageStatus(message = "") {
   }
 
   if (message) {
-    els.storageStatus.textContent = message;
+    setStorageStatusText(message);
+    updateStorageStatusTimestamp();
     updateStorageTrustCopy();
     return;
   }
 
-  els.storageStatus.textContent = rememberDraftEnabled()
+  setStorageStatusText(
+    rememberDraftEnabled()
     ? `Tax year ${currentTaxYear()} draft autosaves in this tab and stays on this device until you clear it.`
-    : `Tax year ${currentTaxYear()} draft autosaves in this tab and clears when the tab closes.`;
+    : `Tax year ${currentTaxYear()} draft autosaves in this tab and clears when the tab closes.`
+  );
+  updateStorageStatusTimestamp();
   updateStorageTrustCopy();
 }
 
@@ -786,7 +860,10 @@ function updateComputeHelpText() {
   }
 
   if (state.supportReviewReadyForEstimate) {
-    setComputeHelp("Ready to calculate. Give the support review one more look before you continue.", "ready");
+    setComputeHelp(
+      "Ready to calculate. Press Ctrl+Enter or Cmd+Enter when you're ready to continue.",
+      "ready"
+    );
     return;
   }
 
@@ -859,6 +936,7 @@ function snapshotHasUserData(snapshot) {
     hasObjectValue(snapshot?.primaryFiler) ||
     hasObjectValue(snapshot?.spouse) ||
     hasObjectValue(snapshot?.adjustments) ||
+    hasText(snapshot?.estimatedTaxPayments) ||
     hasMeaningfulEntries(snapshot?.dependents) ||
     hasMeaningfulEntries(snapshot?.w2s) ||
     hasMeaningfulEntries(snapshot?.interestIncome) ||
@@ -902,6 +980,7 @@ function captureDraftSnapshot() {
       hsaDeduction: readTrimmedControlValue(els.hsaDeduction),
       studentLoanInterestPaid: readTrimmedControlValue(els.studentLoanInterestPaid),
     },
+    estimatedTaxPayments: readTrimmedControlValue(els.estimatedTaxPayments),
     dependents: Array.from(els.dependentContainer.querySelectorAll(".dependent-card")).map((card) => ({
       firstName: readTrimmedQueryValue(card, ".dep-first"),
       lastName: readTrimmedQueryValue(card, ".dep-last"),
@@ -1051,6 +1130,7 @@ function buildAnonymizedSupportInputSnapshot(snapshot, taxYear) {
       hsaDeduction: snapshot.adjustments?.hsaDeduction || "",
       studentLoanInterestPaid: snapshot.adjustments?.studentLoanInterestPaid || "",
     },
+    estimatedTaxPayments: snapshot.estimatedTaxPayments || "",
     dependents: Array.isArray(snapshot.dependents)
       ? snapshot.dependents.map((dependent, index) => ({
           label: `Dependent ${index + 1}`,
@@ -1264,6 +1344,7 @@ function clearStoredDraftData({ refreshStatus = true, taxYear = currentTaxYear()
   removeStoredValue(sessionStorageRef, draftSessionStorageKey(taxYear));
   removeStoredValue(localStorageRef, draftLocalStorageKey(taxYear));
   state.draftEnvelopeCreatedAt = null;
+  state.lastDraftSavedAt = null;
 
   if (refreshStatus) {
     refreshStorageStatus();
@@ -1287,6 +1368,8 @@ function storeDraftEnvelope(envelope, { refreshStatus = true } = {}) {
 
   state.draftEnvelopeCreatedAt =
     typeof envelope.createdAt === "string" && envelope.createdAt ? envelope.createdAt : null;
+  state.lastDraftSavedAt =
+    typeof envelope.updatedAt === "string" && envelope.updatedAt ? envelope.updatedAt : null;
 
   if (refreshStatus) {
     refreshStorageStatus();
@@ -1402,6 +1485,7 @@ function sanitizeDraftSnapshotForRestore(snapshot) {
           hsaDeduction: "",
           studentLoanInterestPaid: "",
         };
+  const estimatedTaxPayments = truncateDraftField(snapshot.estimatedTaxPayments, 32);
 
   const dependents = Array.isArray(snapshot.dependents)
     ? snapshot.dependents.slice(0, MAX_DEPENDENTS).map((dep) => {
@@ -1535,6 +1619,7 @@ function sanitizeDraftSnapshotForRestore(snapshot) {
     primaryFiler,
     spouse,
     adjustments,
+    estimatedTaxPayments,
     dependents,
     w2s,
     socialSecurityIncome,
@@ -1695,7 +1780,7 @@ function applyDraftSnapshot(snapshot) {
     selectStatus(snapshot.filingStatus || "single", { autoSeedDependent: false });
     applyFilerInputs("p", snapshot.primaryFiler);
     applyFilerInputs("s", snapshot.spouse);
-    applyAdjustmentInputs(snapshot.adjustments);
+    applyAdjustmentInputs(snapshot.adjustments, snapshot.estimatedTaxPayments);
     restoreDependents(Array.isArray(snapshot.dependents) ? snapshot.dependents : []);
     restoreW2Cards(Array.isArray(snapshot.w2s) ? snapshot.w2s : []);
     restoreSocialSecurityCards(
@@ -1747,10 +1832,11 @@ function applyFilerInputs(prefix, filer = {}) {
   document.getElementById(`${prefix}Blind`).checked = Boolean(filer.isBlind);
 }
 
-function applyAdjustmentInputs(adjustments = {}) {
+function applyAdjustmentInputs(adjustments = {}, estimatedTaxPayments = "") {
   els.traditionalIraDeduction.value = adjustments.traditionalIraDeduction || "";
   els.hsaDeduction.value = adjustments.hsaDeduction || "";
   els.studentLoanInterestPaid.value = adjustments.studentLoanInterestPaid || "";
+  els.estimatedTaxPayments.value = estimatedTaxPayments || "";
   bindMoneyFields(document);
 }
 
@@ -2003,7 +2089,7 @@ function selectStatus(status, { autoSeedDependent = true, focusSelected = false 
 
 function updateDependentSubtitle(isHoh) {
   els.dependentSubtitle.textContent = isHoh
-    ? "Head of Household requires at least one dependent. Child-related credits only apply to qualifying children under age 17, and TaxVault does not verify every IRS dependency or custody rule."
+    ? "Head of Household requires at least one dependent. TaxVault only supports resident qualifying-person cases it can screen from these inputs, so parent-based and 'other' dependent scenarios are blocked. Child-related credits only apply to qualifying children under age 17, and TaxVault does not verify every IRS dependency or custody rule."
     : "Add any dependents you plan to claim. Dependents entered here may affect the Child Tax Credit or Credit for Other Dependents, but TaxVault does not verify every IRS dependency or custody rule.";
 }
 
@@ -2327,13 +2413,88 @@ function createMoneyInput({ id, className, placeholder }) {
   });
 }
 
-function createCardHeader(title, removeButtonClass) {
+function createCardHeader(title, { clearButtonClass = "", removeButtonClass } = {}) {
   const header = createElement("div", { className: "w2-card-header" });
-  header.append(
-    createElement("h3", { text: title }),
-    createButtonElement({ className: `btn-ghost ${removeButtonClass}`, text: "Remove" })
+  const actions = createElement("div", { className: "w2-card-actions" });
+
+  if (clearButtonClass) {
+    actions.append(
+      createButtonElement({
+        className: `btn-ghost btn-ghost-neutral ${clearButtonClass}`,
+        text: "Clear fields",
+      })
+    );
+  }
+
+  actions.append(
+    createButtonElement({
+      className: `btn-ghost btn-ghost-danger ${removeButtonClass}`,
+      text: "Remove",
+    })
   );
+  header.append(createElement("h3", { text: title }), actions);
   return header;
+}
+
+function clearCardFieldErrors(root) {
+  if (!(root instanceof HTMLElement)) {
+    return;
+  }
+
+  root.querySelectorAll(".field-error-inline").forEach((el) => el.remove());
+  root.querySelectorAll('[aria-invalid="true"]').forEach((el) => {
+    el.removeAttribute("aria-invalid");
+    el.removeAttribute("aria-describedby");
+  });
+}
+
+function resetCardControls(card) {
+  if (!(card instanceof HTMLElement)) {
+    return;
+  }
+
+  clearCardFieldErrors(card);
+
+  card.querySelectorAll('input:not([type="file"]), select, textarea').forEach((control) => {
+    if (!(control instanceof HTMLInputElement || control instanceof HTMLSelectElement || control instanceof HTMLTextAreaElement)) {
+      return;
+    }
+
+    if (control.closest(".upload-zone-wrapper")) {
+      return;
+    }
+
+    if (control instanceof HTMLInputElement && (control.type === "checkbox" || control.type === "radio")) {
+      control.checked = false;
+      return;
+    }
+
+    if (control instanceof HTMLSelectElement) {
+      control.selectedIndex = 0;
+      return;
+    }
+
+    control.value = "";
+  });
+}
+
+function clearCardFields(card, { label, focusSelector, closeAdvanced = false } = {}) {
+  if (!(card instanceof HTMLElement)) {
+    return;
+  }
+
+  resetCardControls(card);
+  hideError();
+
+  if (closeAdvanced && card.querySelector(".w2-advanced-fields")?.classList.contains("open")) {
+    toggleAdvanced(card);
+  }
+
+  resetComputedEstimate();
+  scheduleSupportReview();
+  scheduleDraftSave();
+  announceUiStatus(`Cleared ${label} fields.`);
+  focusFirstField(card, focusSelector);
 }
 
 function createSsnField(inputId, inputClass) {
@@ -2480,13 +2641,25 @@ function addW2({ focusNewCard = true } = {}) {
   advanced.append(advancedToggle, advancedFields);
 
   card.append(
-    createCardHeader(`W-2 #${state.w2Count}`, "remove-w2-btn"),
+    createCardHeader(`W-2 #${state.w2Count}`, {
+      clearButtonClass: "clear-w2-btn",
+      removeButtonClass: "remove-w2-btn",
+    }),
     createReferenceZone("W-2"),
     essential,
     advanced
   );
 
   card.querySelector(".remove-w2-btn").addEventListener("click", () => removeW2(card));
+  card
+    .querySelector(".clear-w2-btn")
+    .addEventListener("click", () =>
+      clearCardFields(card, {
+        label: "W-2",
+        focusSelector: ".w2-employer",
+        closeAdvanced: true,
+      })
+    );
   card.querySelector(".w2-advanced-toggle").addEventListener("click", () => toggleAdvanced(card));
   card.querySelector(".w2-ein").addEventListener("input", (event) => {
     event.target.value = formatDigits(event.target.value, [2, 7]);
@@ -2516,7 +2689,10 @@ function addSocialSecurity({ focusNewCard = true } = {}) {
   const idPrefix = `ssa-${state.socialSecurityCount}`;
   const card = createCardSection("w2-card ssa-card", state.socialSecurityCount);
   card.append(
-    createCardHeader(`SSA-1099 #${state.socialSecurityCount}`, "remove-ssa-btn"),
+    createCardHeader(`SSA-1099 #${state.socialSecurityCount}`, {
+      clearButtonClass: "clear-ssa-btn",
+      removeButtonClass: "remove-ssa-btn",
+    }),
     createReferenceZone("SSA-1099"),
     createRow(
       createField(
@@ -2545,6 +2721,14 @@ function addSocialSecurity({ focusNewCard = true } = {}) {
   );
 
   card.querySelector(".remove-ssa-btn").addEventListener("click", () => removeSocialSecurity(card));
+  card
+    .querySelector(".clear-ssa-btn")
+    .addEventListener("click", () =>
+      clearCardFields(card, {
+        label: "SSA-1099",
+        focusSelector: ".ssa-benefits",
+      })
+    );
   bindMoneyFields(card);
 
   els.socialSecurityContainer.append(card);
@@ -2570,7 +2754,10 @@ function addInterest({ focusNewCard = true } = {}) {
   const idPrefix = `int-${state.interestCount}`;
   const card = createCardSection("w2-card interest-card", state.interestCount);
   card.append(
-    createCardHeader(`1099-INT #${state.interestCount}`, "remove-interest-btn"),
+    createCardHeader(`1099-INT #${state.interestCount}`, {
+      clearButtonClass: "clear-interest-btn",
+      removeButtonClass: "remove-interest-btn",
+    }),
     createReferenceZone("1099-INT"),
     createRow(
       createField(
@@ -2610,6 +2797,14 @@ function addInterest({ focusNewCard = true } = {}) {
   card
     .querySelector(".remove-interest-btn")
     .addEventListener("click", () => removeInterest(card));
+  card
+    .querySelector(".clear-interest-btn")
+    .addEventListener("click", () =>
+      clearCardFields(card, {
+        label: "1099-INT",
+        focusSelector: ".interest-taxable",
+      })
+    );
   bindMoneyFields(card);
 
   els.interestContainer.append(card);
@@ -2635,7 +2830,10 @@ function addDividend({ focusNewCard = true } = {}) {
   const idPrefix = `div-${state.dividendCount}`;
   const card = createCardSection("w2-card dividend-card", state.dividendCount);
   card.append(
-    createCardHeader(`1099-DIV #${state.dividendCount}`, "remove-dividend-btn"),
+    createCardHeader(`1099-DIV #${state.dividendCount}`, {
+      clearButtonClass: "clear-dividend-btn",
+      removeButtonClass: "remove-dividend-btn",
+    }),
     createReferenceZone("1099-DIV"),
     createRow(
       createField(
@@ -2675,6 +2873,14 @@ function addDividend({ focusNewCard = true } = {}) {
   card
     .querySelector(".remove-dividend-btn")
     .addEventListener("click", () => removeDividend(card));
+  card
+    .querySelector(".clear-dividend-btn")
+    .addEventListener("click", () =>
+      clearCardFields(card, {
+        label: "1099-DIV",
+        focusSelector: ".dividend-ordinary",
+      })
+    );
   bindMoneyFields(card);
 
   els.dividendContainer.append(card);
@@ -2700,7 +2906,10 @@ function addDependent({ focusNewCard = true } = {}) {
   const idPrefix = `dep-${state.dependentCount}`;
   const card = createCardSection("dependent-card", state.dependentCount);
   card.append(
-    createCardHeader(`Dependent #${state.dependentCount}`, "remove-dependent-btn"),
+    createCardHeader(`Dependent #${state.dependentCount}`, {
+      clearButtonClass: "clear-dependent-btn",
+      removeButtonClass: "remove-dependent-btn",
+    }),
     createRow(
       createField(
         "First Name",
@@ -2764,6 +2973,14 @@ function addDependent({ focusNewCard = true } = {}) {
   );
 
   card.querySelector(".remove-dependent-btn").addEventListener("click", () => removeDependent(card));
+  card
+    .querySelector(".clear-dependent-btn")
+    .addEventListener("click", () =>
+      clearCardFields(card, {
+        label: "dependent",
+        focusSelector: ".dep-first",
+      })
+    );
   bindSsnFields(card);
   applyDateConstraints(card);
 
@@ -3183,6 +3400,7 @@ function buildPayload() {
   const interestIncome = collectInterestCards(errors);
   const dividendIncome = collectDividendCards(errors);
   const adjustments = collectAdjustments(errors);
+  const estimatedTaxPayments = collectEstimatedTaxPayments(errors);
 
   enforceCollectionLimit(errors, "W-2 forms", w2s.length, MAX_W2_FORMS);
   enforceCollectionLimit(
@@ -3220,6 +3438,7 @@ function buildPayload() {
         interest_income: interestIncome,
         dividend_income: dividendIncome,
         social_security_income: socialSecurityIncome,
+        estimated_tax_payments: estimatedTaxPayments,
         adjustments,
       },
     },
@@ -3269,6 +3488,16 @@ function collectAdjustments(errors) {
   });
 
   return adjustments;
+}
+
+function collectEstimatedTaxPayments(errors) {
+  const value = parseMoney(readTrimmedControlValue(els.estimatedTaxPayments), 0);
+  if (!Number.isFinite(value) || value < 0) {
+    errors.push("Estimated tax payments must be 0 or greater.");
+    return 0;
+  }
+
+  return value;
 }
 
 function filerPayload(filer) {
@@ -3746,6 +3975,7 @@ function buildBreakdownRows(summary) {
       label: "SSA-1099 Voluntary Withholding",
     },
     { key: "total_federal_withholding", label: "Total Federal Withholding" },
+    { key: "estimated_tax_payments", label: "Estimated Tax Payments" },
     {
       key: "additional_child_tax_credit",
       label: "Additional Child Tax Credit",
@@ -4461,8 +4691,13 @@ function buildReviewPacketHtml(envelope) {
     ["1099-DIV forms", String(Array.isArray(draft.dividendIncome) ? draft.dividendIncome.length : 0)],
     ["Dependents", String(Array.isArray(draft.dependents) ? draft.dependents.length : 0)],
     [
-      "Adjustments entered",
-      [draft.adjustments?.traditionalIraDeduction, draft.adjustments?.hsaDeduction, draft.adjustments?.studentLoanInterestPaid]
+      "Adjustments/payments entered",
+      [
+        draft.adjustments?.traditionalIraDeduction,
+        draft.adjustments?.hsaDeduction,
+        draft.adjustments?.studentLoanInterestPaid,
+        draft.estimatedTaxPayments,
+      ]
         .filter((value) => String(value || "").trim() !== "")
         .length > 0
         ? "Yes"
@@ -4474,6 +4709,7 @@ function buildReviewPacketHtml(envelope) {
     ["Traditional IRA Deduction", draft.adjustments?.traditionalIraDeduction || "0"],
     ["HSA Deduction", draft.adjustments?.hsaDeduction || "0"],
     ["Student Loan Interest Paid", draft.adjustments?.studentLoanInterestPaid || "0"],
+    ["Estimated Tax Payments", draft.estimatedTaxPayments || "0"],
   ];
 
   const dependentRows = Array.isArray(draft.dependents)
@@ -4732,8 +4968,8 @@ function buildReviewPacketHtml(envelope) {
         ${renderReviewPacketTable(["Field", "Value"], inputRows)}
       </div>
       <div class="card">
-        <div class="label">Adjustments</div>
-        ${renderReviewPacketTable(["Adjustment", "Entered Amount"], adjustmentRows)}
+        <div class="label">Adjustments &amp; Payments</div>
+        ${renderReviewPacketTable(["Entry", "Entered Amount"], adjustmentRows)}
       </div>
     </div>
     <div class="section-grid" style="margin-top: 1rem;">
@@ -4932,6 +5168,7 @@ function clearAllData() {
   els.traditionalIraDeduction.value = "";
   els.hsaDeduction.value = "";
   els.studentLoanInterestPaid.value = "";
+  els.estimatedTaxPayments.value = "";
 
   els.w2Container.replaceChildren();
   els.socialSecurityContainer.replaceChildren();
@@ -4958,6 +5195,7 @@ function clearAllData() {
 
   state.safetyAcknowledged = false;
   state.draftEnvelopeCreatedAt = null;
+  state.lastDraftSavedAt = null;
   els.gateAcknowledge.checked = false;
   updateGateButtonState();
   els.app.classList.add("hidden");

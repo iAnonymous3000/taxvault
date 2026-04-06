@@ -71,6 +71,7 @@ struct TaxSummary {
     additional_child_tax_credit: String,
     total_w2_federal_withholding: String,
     total_social_security_withholding: String,
+    estimated_tax_payments: String,
     total_tax: String,
     total_federal_withholding: String,
     total_payments: String,
@@ -259,6 +260,7 @@ fn compute_tax_inner(json_input: &str) -> WasmResult {
         additional_child_tax_credit: decimal_str(result.additional_child_tax_credit),
         total_w2_federal_withholding: decimal_str(result.total_w2_federal_withholding),
         total_social_security_withholding: decimal_str(result.total_social_security_withholding),
+        estimated_tax_payments: decimal_str(result.estimated_tax_payments),
         total_tax: decimal_str(result.total_tax),
         total_federal_withholding: decimal_str(result.total_federal_withholding),
         total_payments: decimal_str(result.total_payments),
@@ -269,8 +271,8 @@ fn compute_tax_inner(json_input: &str) -> WasmResult {
         "Not a filing product, signed return, or payment recommendation.".into(),
         "Does not support EIC, itemized deductions, pensions, IRA distributions, Schedule C, capital gains schedules, ACA credits, or most other federal schedules."
             .into(),
-        "Traditional IRA and HSA deductions are applied exactly as entered. TaxVault does not verify employer-plan coverage, HDHP eligibility, annual limits, or excess contributions.".into(),
-        "Head of Household and dependency qualification rules are not fully verified by the app.".into(),
+        "Traditional IRA and HSA deductions are outside the supported estimate slice because TaxVault does not collect employer-plan coverage, HDHP eligibility, annual limits, or excess-contribution details.".into(),
+        "Head of Household and dependency qualification rules are not fully verified by the app. Parent-based and 'other' dependent HOH cases are blocked outside the supported slice.".into(),
     ];
 
     if !rules.meta.table_verification_status.is_human_verified() {
@@ -286,7 +288,7 @@ fn compute_tax_inner(json_input: &str) -> WasmResult {
         tax_table_local_estimate_ready: rules.meta.table_verification_status.allows_estimate_compute(),
         tax_table_human_verified: rules.meta.table_verification_status.is_human_verified(),
         estimate_scope: format!(
-            "Narrow {} federal estimate for supported W-2, SSA-1099, 1099-INT, 1099-DIV, and limited above-the-line deduction scenarios only.",
+            "Narrow {} federal estimate for supported W-2, SSA-1099, 1099-INT, 1099-DIV, estimated tax payment, and student loan interest scenarios only.",
             rules.meta.tax_year
         ),
         privacy:
@@ -450,27 +452,15 @@ fn collect_input_cautions(facts: &TaxFacts) -> Vec<String> {
         && facts.dependents.iter().any(|dependent| {
             matches!(
                 dependent.relationship,
-                DependentRelationship::Parent
-                    | DependentRelationship::Grandparent
-                    | DependentRelationship::Other
+                DependentRelationship::Parent | DependentRelationship::Other
             )
         })
     {
         push_unique(
             &mut cautions,
-            "A parent, grandparent, or 'other' dependent does not automatically establish Head of Household. Support and household rules still need manual review.",
+            "A parent or 'other' dependent does not automatically establish Head of Household. Support and household rules still need manual review.",
         );
     }
-
-    if facts.adjustments.traditional_ira_deduction > Decimal::ZERO
-        || facts.adjustments.hsa_deduction > Decimal::ZERO
-    {
-        push_unique(
-            &mut cautions,
-            "Traditional IRA and HSA deductions are applied exactly as entered. TaxVault does not verify employer-plan coverage, HDHP eligibility, annual limits, or excess contributions.",
-        );
-    }
-
     cautions
 }
 
@@ -762,7 +752,7 @@ mod tests {
     }
 
     #[test]
-    fn review_tax_input_surfaces_hoh_and_dependent_cautions_when_estimates_are_allowed() {
+    fn review_tax_input_reports_unsupported_parent_based_hoh_case() {
         let json = r#"
         {
           "input": {
@@ -802,6 +792,63 @@ mod tests {
         "#;
 
         let review = review_tax_input_inner(json);
+        assert!(!review.ready_for_estimate);
+        assert_eq!(review.status, "unsupported");
+        assert!(review
+            .blocking_issues
+            .iter()
+            .any(|issue| issue.contains("dependent parent")));
+        assert!(review
+            .cautions
+            .iter()
+            .any(|caution| caution.contains("Head of Household is still a manual determination")));
+        assert!(review
+            .cautions
+            .iter()
+            .any(|caution| caution.contains("does not automatically establish Head of Household")));
+    }
+
+    #[test]
+    fn review_tax_input_surfaces_hoh_caution_for_supported_child_case() {
+        let json = r#"
+        {
+          "input": {
+            "tax_year": 2025,
+            "filing_status": "head_of_household",
+            "primary_filer": {
+              "first_name": "Alex",
+              "last_name": "Filer",
+              "ssn": "400-01-0001",
+              "date_of_birth": "1990-06-15",
+              "is_blind": false,
+              "is_dependent": false
+            },
+            "spouse": null,
+            "dependents": [{
+              "first_name": "Pat",
+              "last_name": "Filer",
+              "ssn": "400-02-0002",
+              "date_of_birth": "2016-06-15",
+              "relationship": "daughter",
+              "months_lived_in_home": 12
+            }],
+            "w2_income": [{
+              "recipient": "primary",
+              "employer_name": "Northwind Co",
+              "employer_ein": "12-3456789",
+              "wages": 60000,
+              "federal_tax_withheld": 8000,
+              "state_tax_withheld": 0,
+              "social_security_wages": 60000,
+              "social_security_tax_withheld": 3720,
+              "medicare_wages": 60000,
+              "medicare_tax_withheld": 870
+            }]
+          }
+        }
+        "#;
+
+        let review = review_tax_input_inner(json);
         assert!(review.ready_for_estimate);
         assert_eq!(review.status, "ready");
         assert!(review
@@ -811,7 +858,53 @@ mod tests {
         assert!(review
             .cautions
             .iter()
-            .any(|caution| caution.contains("does not automatically establish Head of Household")));
+            .any(|caution| caution.contains("machine-checked")));
+    }
+
+    #[test]
+    fn review_tax_input_reports_unsupported_traditional_ira_deduction() {
+        let json = r#"
+        {
+          "input": {
+            "tax_year": 2025,
+            "filing_status": "single",
+            "primary_filer": {
+              "first_name": "Alex",
+              "last_name": "Filer",
+              "ssn": "400-01-0001",
+              "date_of_birth": "1990-06-15",
+              "is_blind": false,
+              "is_dependent": false
+            },
+            "spouse": null,
+            "w2_income": [{
+              "recipient": "primary",
+              "employer_name": "Northwind Co",
+              "employer_ein": "12-3456789",
+              "wages": 60000,
+              "federal_tax_withheld": 8000,
+              "state_tax_withheld": 0,
+              "social_security_wages": 60000,
+              "social_security_tax_withheld": 3720,
+              "medicare_wages": 60000,
+              "medicare_tax_withheld": 870
+            }],
+            "adjustments": {
+              "traditional_ira_deduction": 1000,
+              "hsa_deduction": 0,
+              "student_loan_interest_paid": 0
+            }
+          }
+        }
+        "#;
+
+        let review = review_tax_input_inner(json);
+        assert!(!review.ready_for_estimate);
+        assert_eq!(review.status, "unsupported");
+        assert!(review
+            .blocking_issues
+            .iter()
+            .any(|issue| issue.contains("Traditional IRA deduction estimates are not supported")));
     }
 
     #[test]

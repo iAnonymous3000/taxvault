@@ -40,6 +40,7 @@ pub struct ComputedReturn {
     pub additional_child_tax_credit: Decimal,
     pub total_w2_federal_withholding: Decimal,
     pub total_social_security_withholding: Decimal,
+    pub estimated_tax_payments: Decimal,
     pub total_tax: Decimal,
     pub total_federal_withholding: Decimal,
     pub total_payments: Decimal,
@@ -374,12 +375,22 @@ pub fn compute(
         vec![child_credit_id],
     );
 
-    let total_payments = total_federal_withholding + child_credit.additional_child_tax_credit;
+    let estimated_tax_payments = facts.estimated_tax_payments;
+    let estimated_tax_payments_id = tb.add(
+        "Estimated Tax Payments (Line 26)",
+        estimated_tax_payments,
+        "Quarterly estimated federal tax payments entered by the user",
+        vec![],
+    );
+
+    let total_payments = total_federal_withholding
+        + estimated_tax_payments
+        + child_credit.additional_child_tax_credit;
     let payments_id = tb.add(
         "Total Payments (Line 33)",
         total_payments,
-        "Line 33 = withholding + refundable child tax credit",
-        vec![withholding_id, actc_id],
+        "Line 33 = withholding + estimated tax payments + refundable child tax credit",
+        vec![withholding_id, estimated_tax_payments_id, actc_id],
     );
 
     let (balance_due, overpayment) = if total_tax > total_payments {
@@ -435,6 +446,7 @@ pub fn compute(
         additional_child_tax_credit: child_credit.additional_child_tax_credit,
         total_w2_federal_withholding,
         total_social_security_withholding,
+        estimated_tax_payments,
         total_tax,
         total_federal_withholding,
         total_payments,
@@ -764,33 +776,19 @@ mod tests {
         }
     }
 
-    #[test]
-    fn child_turning_seventeen_on_last_day_of_year_is_not_qualifying() {
-        let dependent = dependent_with_birth_date(2008, 12, 31);
-
-        assert!(!is_qualifying_child_for_child_tax_credit(&dependent, 2025));
-    }
-
-    #[test]
-    fn child_still_sixteen_at_year_end_is_qualifying() {
-        let dependent = dependent_with_birth_date(2009, 1, 1);
-
-        assert!(is_qualifying_child_for_child_tax_credit(&dependent, 2025));
-    }
-
-    #[test]
-    fn unverified_table_refused() {
+    fn sample_rule_pack(
+        table_verification_status: crate::rule_pack::TaxTableVerificationStatus,
+    ) -> crate::rule_pack::RulePack {
         use crate::rule_pack::*;
         use crate::tax_table::{TaxTable, TaxTableRow};
-        use taxvault_core::*;
 
-        let rules = RulePack {
+        RulePack {
             meta: RulePackMeta {
                 tax_year: 2025,
                 jurisdiction: "federal".into(),
                 version: "1.0.0".into(),
                 effective_date: "2025-01-01".into(),
-                table_verification_status: TaxTableVerificationStatus::Unverified,
+                table_verification_status,
             },
             standard_deduction: StandardDeductionRules {
                 single: Decimal::from(15750),
@@ -861,9 +859,13 @@ mod tests {
             },
             age_threshold: DateYmd::new(1961, 1, 2).unwrap(),
             test_vectors: vec![],
-        };
+        }
+    }
 
-        let facts = TaxFacts {
+    fn sample_facts() -> TaxFacts {
+        use taxvault_core::*;
+
+        TaxFacts {
             tax_year: 2025,
             filing_status: FilingStatus::Single,
             primary_filer: FilerInfo {
@@ -891,8 +893,29 @@ mod tests {
             interest_income: vec![],
             dividend_income: vec![],
             social_security_income: vec![],
+            estimated_tax_payments: Decimal::ZERO,
             adjustments: IncomeAdjustments::default(),
-        };
+        }
+    }
+
+    #[test]
+    fn child_turning_seventeen_on_last_day_of_year_is_not_qualifying() {
+        let dependent = dependent_with_birth_date(2008, 12, 31);
+
+        assert!(!is_qualifying_child_for_child_tax_credit(&dependent, 2025));
+    }
+
+    #[test]
+    fn child_still_sixteen_at_year_end_is_qualifying() {
+        let dependent = dependent_with_birth_date(2009, 1, 1);
+
+        assert!(is_qualifying_child_for_child_tax_credit(&dependent, 2025));
+    }
+
+    #[test]
+    fn unverified_table_refused() {
+        let rules = sample_rule_pack(crate::rule_pack::TaxTableVerificationStatus::Unverified);
+        let facts = sample_facts();
 
         // Without override -> refused
         let opts = ComputeOptions {
@@ -909,6 +932,21 @@ mod tests {
         assert!(result.is_ok());
         let ret = result.unwrap();
         assert_eq!(ret.income_tax, Decimal::from(5075));
+    }
+
+    #[test]
+    fn estimated_tax_payments_increase_total_payments_and_overpayment() {
+        let rules = sample_rule_pack(crate::rule_pack::TaxTableVerificationStatus::HumanVerified);
+        let mut facts = sample_facts();
+        facts.estimated_tax_payments = Decimal::from(400);
+
+        let ret = compute(&facts, &rules, &ComputeOptions::default()).unwrap();
+
+        assert_eq!(ret.estimated_tax_payments, Decimal::from(400));
+        assert_eq!(ret.total_federal_withholding, Decimal::from(8000));
+        assert_eq!(ret.total_payments, Decimal::from(8400));
+        assert_eq!(ret.overpayment, Decimal::from(3325));
+        assert_eq!(ret.balance_due, Decimal::ZERO);
     }
 
     #[test]

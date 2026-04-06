@@ -15,6 +15,7 @@ Use this checklist for any public estimate release.
 - Confirm `verification.reviewed_at` matches the recorded review date.
 - Confirm `verification.method` describes the review that was actually performed.
 - Run `python3 scripts/verify_tax_table.py --report --check`
+- Run `python3 scripts/verify_tax_table.py --report --check --require-public-release-ready`
 
 ## Verification Commands
 

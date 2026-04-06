@@ -397,6 +397,7 @@ class WebSmokeTests(unittest.TestCase):
                 "additional_child_tax_credit": "0",
                 "total_w2_federal_withholding": "8000",
                 "total_social_security_withholding": "0",
+                "estimated_tax_payments": "0",
                 "total_tax": "4681",
                 "total_federal_withholding": "8000",
                 "total_payments": "8000",
@@ -440,6 +441,7 @@ class WebSmokeTests(unittest.TestCase):
                     "25a": {"Currency": "8000"},
                     "25b": {"Currency": "0"},
                     "25d": {"Currency": "8000"},
+                    "26": {"Currency": "0"},
                     "28": {"Currency": "0"},
                     "33": {"Currency": "8000"},
                     "34": {"Currency": "3319"},
@@ -541,7 +543,7 @@ class WebSmokeTests(unittest.TestCase):
         )
         self.assertTrue(self.browser.is_disabled("#computeBtn"))
 
-    def test_head_of_household_parent_case_surfaces_manual_review_caution(self):
+    def test_head_of_household_parent_case_is_blocked_before_compute(self):
         self.open_app()
         self.browser.click('.status-option[data-status="head_of_household"]')
         self.browser.set_value("#pFirst", "Alex")
@@ -561,16 +563,31 @@ class WebSmokeTests(unittest.TestCase):
         )
         self.add_supported_w2()
 
-        self.wait_for_ready_review()
-        cautions = self.browser.texts("#supportReviewCautions li")
-        self.assertTrue(
-            any("Head of Household is still a manual determination" in item for item in cautions)
+        self.browser.wait_for(
+            lambda: self.browser.text("#supportReviewBadge") == "Unsupported",
+            "support review never marked the parent-based Head of Household draft unsupported",
         )
+        issues = self.browser.texts("#supportReviewIssues li")
         self.assertTrue(
-            any("does not automatically establish Head of Household" in item for item in cautions)
+            any("dependent parent" in item for item in issues)
         )
-        self.assertTrue(any("machine-checked" in item for item in cautions))
-        self.assertFalse(self.browser.is_disabled("#computeBtn"))
+        self.assertTrue(self.browser.is_disabled("#computeBtn"))
+
+    def test_traditional_ira_deduction_is_blocked_before_compute(self):
+        self.open_app()
+        self.fill_step1_single()
+        self.add_supported_w2()
+        self.browser.set_value("#traditionalIraDeduction", "1000")
+
+        self.browser.wait_for(
+            lambda: self.browser.text("#supportReviewBadge") == "Unsupported",
+            "support review never marked the Traditional IRA deduction draft unsupported",
+        )
+        issues = self.browser.texts("#supportReviewIssues li")
+        self.assertTrue(
+            any("Traditional IRA deduction estimates are not supported" in item for item in issues)
+        )
+        self.assertTrue(self.browser.is_disabled("#computeBtn"))
 
     def test_draft_1040_preview_renders_printable_mock_result(self):
         self.open_app()

@@ -18,9 +18,11 @@ Do not use it to file a return, sign a tax document, or decide how much to pay t
 
 ## What The App Supports
 
-- Filing statuses: `Single`, `Married Filing Jointly`, `Head of Household`
+- Filing statuses: `Single`, `Married Filing Jointly`, `Head of Household` for resident qualifying-person cases TaxVault can screen from current inputs
 - Income: `W-2`, `SSA-1099`, `1099-INT`, `1099-DIV`
 - Standard deduction, including age 65+ and blindness adjustments
+- Student loan interest paid, subject to the 2025 cap and MAGI phaseout rules
+- Estimated tax payments entered by the user (Form 1040 line 26)
 - Child Tax Credit and Credit for Other Dependents for entered dependents
 - Guided manual entry helpers for supported paper forms
 - Multiple local PDF/image reference uploads per supported form card for on-screen review
@@ -34,10 +36,13 @@ Do not use it to file a return, sign a tax document, or decide how much to pay t
 - Itemized deductions
 - Pensions and annuities
 - IRA distributions
+- Traditional IRA deductions
+- HSA deductions
 - Schedule C
 - Capital gains schedules
 - ACA credits
 - Most federal forms and schedules outside the supported slice
+- Head of Household cases that depend on a parent or an `other` relationship rather than a resident qualifying person TaxVault can screen
 - OCR or importing fields from uploaded PDFs/images
 - Filing-ready review
 - Official IRS form PDFs ready for filing

@@ -23,6 +23,8 @@ pub struct TaxFactsDto {
     pub interest_income: Option<Vec<InterestIncomeDto>>,
     pub dividend_income: Option<Vec<DividendIncomeDto>>,
     pub social_security_income: Option<Vec<SocialSecurityIncomeDto>>,
+    #[serde(default)]
+    pub estimated_tax_payments: Decimal,
     pub adjustments: Option<AdjustmentsDto>,
 }
 

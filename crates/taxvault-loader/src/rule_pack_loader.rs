@@ -608,6 +608,7 @@ fn build_facts_from_vector(vector: &TestVector, tax_year: u16) -> TaxFacts {
         interest_income: vec![],
         dividend_income: vec![],
         social_security_income: vec![],
+        estimated_tax_payments: Decimal::ZERO,
         adjustments: IncomeAdjustments::default(),
     }
 }

@@ -38,9 +38,10 @@ If any required field is missing, the repository must not treat the table as hig
 2. Confirm coverage is continuous from `$0` through the required table range.
 3. Confirm the midpoint rounding convention and bracket transitions match the official source.
 4. Run `python3 scripts/verify_tax_table.py --report --check`.
-5. Run the full local verification flow from the repo root.
-6. Record the reviewer name, date, and method in the CSV header if you are moving to `human_verified`.
-7. Complete `docs/release-checklist.md` before public release.
+5. Before any public release, run `python3 scripts/verify_tax_table.py --report --check --require-public-release-ready`.
+6. Run the full local verification flow from the repo root.
+7. Record the reviewer name, date, and method in the CSV header if you are moving to `human_verified`.
+8. Complete `docs/release-checklist.md` before public release.
 
 ## Current Repository Policy
 
@@ -53,3 +54,4 @@ Until the metadata above is completed by a named reviewer, keep the repository a
 Local/private estimate calculations may run while the embedded table is `machine_checked`, but public estimate releases should remain blocked until it is `human_verified`.
 
 If you need to regenerate `tax-table/federal_2025_table.csv`, use `python3 scripts/verify_tax_table.py --write --report --check`. That rewrite flow preserves the existing verification metadata unless you explicitly override it.
+For public-release signoff, pair it with `--require-public-release-ready` after the human reviewer metadata is recorded.

@@ -144,6 +144,13 @@ impl TaxFacts {
             validate_social_security_amounts(benefit, &mut errors);
         }
 
+        if self.estimated_tax_payments < Decimal::ZERO {
+            errors.push(ValidationError::NegativeAmount {
+                field: "estimated_tax_payments".to_string(),
+                value: self.estimated_tax_payments.to_string(),
+            });
+        }
+
         validate_adjustment_amounts(&self.adjustments, &mut errors);
 
         if errors.is_empty() {
@@ -488,6 +495,7 @@ mod tests {
             interest_income: vec![],
             dividend_income: vec![],
             social_security_income: vec![],
+            estimated_tax_payments: Decimal::ZERO,
             adjustments: IncomeAdjustments::default(),
         }
     }
@@ -550,6 +558,7 @@ mod tests {
             interest_income: vec![],
             dividend_income: vec![],
             social_security_income: vec![],
+            estimated_tax_payments: Decimal::ZERO,
             adjustments: IncomeAdjustments::default(),
         };
         let errs = facts.validate_structure().unwrap_err();
@@ -570,6 +579,7 @@ mod tests {
             interest_income: vec![test_interest(FilerRole::Primary)],
             dividend_income: vec![],
             social_security_income: vec![],
+            estimated_tax_payments: Decimal::ZERO,
             adjustments: IncomeAdjustments::default(),
         };
 
@@ -588,6 +598,7 @@ mod tests {
             interest_income: vec![],
             dividend_income: vec![],
             social_security_income: vec![test_social_security(FilerRole::Primary)],
+            estimated_tax_payments: Decimal::ZERO,
             adjustments: IncomeAdjustments::default(),
         };
 
@@ -658,6 +669,25 @@ mod tests {
     }
 
     #[test]
+    fn negative_estimated_tax_payments_rejected() {
+        let facts = TaxFacts {
+            estimated_tax_payments: Decimal::from(-1),
+            ..facts_with_w2s(
+                FilingStatus::Single,
+                None,
+                vec![test_w2(FilerRole::Primary)],
+            )
+        };
+
+        let errs = facts.validate_structure().unwrap_err();
+        assert!(errs.iter().any(|e| matches!(
+            e,
+            ValidationError::NegativeAmount { field, .. }
+            if field == "estimated_tax_payments"
+        )));
+    }
+
+    #[test]
     fn withholding_exceeds_wages() {
         let mut w2 = test_w2(FilerRole::Primary);
         w2.federal_tax_withheld = Decimal::from(70000);
@@ -711,6 +741,7 @@ mod tests {
             interest_income: vec![],
             dividend_income: vec![],
             social_security_income: vec![],
+            estimated_tax_payments: Decimal::ZERO,
             adjustments: IncomeAdjustments::default(),
         };
         let errs = facts.validate_structure().unwrap_err();
@@ -803,6 +834,7 @@ mod tests {
             interest_income: vec![test_interest(FilerRole::Spouse)],
             dividend_income: vec![],
             social_security_income: vec![],
+            estimated_tax_payments: Decimal::ZERO,
             adjustments: IncomeAdjustments::default(),
         };
         let errs = facts.validate_structure().unwrap_err();
@@ -827,6 +859,7 @@ mod tests {
             interest_income: vec![],
             dividend_income: vec![dividend],
             social_security_income: vec![],
+            estimated_tax_payments: Decimal::ZERO,
             adjustments: IncomeAdjustments::default(),
         };
 
@@ -849,6 +882,7 @@ mod tests {
             interest_income: vec![],
             dividend_income: vec![],
             social_security_income: vec![test_social_security(FilerRole::Spouse)],
+            estimated_tax_payments: Decimal::ZERO,
             adjustments: IncomeAdjustments::default(),
         };
         let errs = facts.validate_structure().unwrap_err();
@@ -873,6 +907,7 @@ mod tests {
             interest_income: vec![interest],
             dividend_income: vec![],
             social_security_income: vec![],
+            estimated_tax_payments: Decimal::ZERO,
             adjustments: IncomeAdjustments::default(),
         };
         assert!(facts.validate_structure().is_ok());
@@ -892,6 +927,7 @@ mod tests {
             interest_income: vec![],
             dividend_income: vec![dividend],
             social_security_income: vec![],
+            estimated_tax_payments: Decimal::ZERO,
             adjustments: IncomeAdjustments::default(),
         };
         assert!(facts.validate_structure().is_ok());
@@ -912,6 +948,7 @@ mod tests {
             interest_income: vec![],
             dividend_income: vec![dividend],
             social_security_income: vec![],
+            estimated_tax_payments: Decimal::ZERO,
             adjustments: IncomeAdjustments::default(),
         };
         let errs = facts.validate_structure().unwrap_err();
@@ -937,6 +974,7 @@ mod tests {
             interest_income: vec![],
             dividend_income: vec![],
             social_security_income: vec![benefit],
+            estimated_tax_payments: Decimal::ZERO,
             adjustments: IncomeAdjustments::default(),
         };
 

@@ -71,7 +71,7 @@ pub fn compile_1040(ret: &ComputedReturn) -> FormLineMap {
     currency(&mut lines, "25b", ret.total_social_security_withholding);
     currency(&mut lines, "25c", zero);
     currency(&mut lines, "25d", ret.total_federal_withholding);
-    currency(&mut lines, "26", zero);
+    currency(&mut lines, "26", ret.estimated_tax_payments);
     currency(&mut lines, "27", zero);
     currency(&mut lines, "28", ret.additional_child_tax_credit);
     currency(&mut lines, "29", zero);
@@ -134,6 +134,7 @@ mod tests {
             additional_child_tax_credit: Decimal::ZERO,
             total_w2_federal_withholding: Decimal::from(8000),
             total_social_security_withholding: Decimal::ZERO,
+            estimated_tax_payments: Decimal::ZERO,
             total_tax: Decimal::from(5075),
             total_federal_withholding: Decimal::from(8000),
             total_payments: Decimal::from(8000),
@@ -185,6 +186,7 @@ mod tests {
             form.lines["25a"],
             FormLineValue::Currency(Decimal::from(8000))
         );
+        assert_eq!(form.lines["26"], FormLineValue::Currency(Decimal::ZERO));
         assert_eq!(
             form.lines["33"],
             FormLineValue::Currency(Decimal::from(8000))
@@ -225,10 +227,11 @@ mod tests {
         ret.additional_child_tax_credit = Decimal::from(300);
         ret.total_w2_federal_withholding = Decimal::from(8000);
         ret.total_social_security_withholding = Decimal::from(250);
+        ret.estimated_tax_payments = Decimal::from(400);
         ret.total_federal_withholding = Decimal::from(8250);
         ret.total_tax = Decimal::from(3140);
-        ret.total_payments = Decimal::from(8550);
-        ret.overpayment = Decimal::from(5410);
+        ret.total_payments = Decimal::from(8950);
+        ret.overpayment = Decimal::from(5810);
 
         let form = compile_1040(&ret);
         assert_eq!(form.lines["2a"], FormLineValue::Currency(Decimal::from(50)));
@@ -281,12 +284,16 @@ mod tests {
             FormLineValue::Currency(Decimal::from(250))
         );
         assert_eq!(
+            form.lines["26"],
+            FormLineValue::Currency(Decimal::from(400))
+        );
+        assert_eq!(
             form.lines["28"],
             FormLineValue::Currency(Decimal::from(300))
         );
         assert_eq!(
             form.lines["33"],
-            FormLineValue::Currency(Decimal::from(8550))
+            FormLineValue::Currency(Decimal::from(8950))
         );
     }
 

@@ -24,6 +24,14 @@ python3 scripts/verify_tax_table.py --report --check
 
 This regenerates the expected table from `rules/federal_2025.toml` using midpoint rounding, validates the recorded verification metadata, and fails if the checked-in CSV differs.
 
+Before any public estimate release, also run:
+
+```sh
+python3 scripts/verify_tax_table.py --report --check --require-public-release-ready
+```
+
+That stronger mode fails unless the CSV is internally consistent and the metadata is fully `human_verified`.
+
 ## Safer Rewrite Flow
 
 If you need to rewrite the CSV after updating brackets or row generation logic, the script now preserves the existing verification metadata by default:

@@ -768,8 +768,17 @@ body.gate-open {
 }
 
 .toolbar-status {
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
   color: var(--text-muted);
   font-size: 0.82rem;
+}
+
+.toolbar-status-meta {
+  color: var(--text-secondary);
+  font-size: 0.75rem;
+  font-weight: 700;
 }
 
 .toolbar-actions {
@@ -1022,6 +1031,13 @@ body.gate-open {
   margin-bottom: 1rem;
 }
 
+.w2-card-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.45rem;
+  justify-content: flex-end;
+}
+
 .w2-card-header h3 {
   margin: 0;
   color: var(--text-secondary);
@@ -1139,7 +1155,12 @@ body.gate-open {
   touch-action: manipulation;
 }
 
-.btn-ghost:hover:not(:disabled) {
+.btn-ghost-neutral:hover:not(:disabled) {
+  color: var(--blue-300);
+  background: var(--blue-50);
+}
+
+.btn-ghost-danger:hover:not(:disabled) {
   color: var(--red-500);
   background: var(--red-50);
 }

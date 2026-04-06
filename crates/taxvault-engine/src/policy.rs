@@ -1,5 +1,5 @@
 use rust_decimal::Decimal;
-use taxvault_core::{FilerRole, FilingStatus, TaxFacts};
+use taxvault_core::{Dependent, DependentRelationship, FilerRole, FilingStatus, TaxFacts};
 
 use crate::error::PolicyError;
 use crate::rule_pack::RulePack;
@@ -81,11 +81,73 @@ pub fn validate_supported_slice(
         }
     }
 
+    if facts.filing_status == FilingStatus::HeadOfHousehold
+        && !facts
+            .dependents
+            .iter()
+            .any(is_supported_hoh_qualifying_person_candidate)
+    {
+        if facts
+            .dependents
+            .iter()
+            .any(|dependent| dependent.relationship == DependentRelationship::Parent)
+        {
+            errors.push(PolicyError::HeadOfHouseholdNotSupported {
+                reason: "dependent parent cases require parent-home support checks that TaxVault does not collect".into(),
+            });
+        }
+
+        if facts
+            .dependents
+            .iter()
+            .any(|dependent| dependent.relationship == DependentRelationship::Other)
+        {
+            errors.push(PolicyError::HeadOfHouseholdNotSupported {
+                reason: "the 'other' relationship is too broad for TaxVault to determine a qualifying person for Head of Household".into(),
+            });
+        }
+
+        if !errors
+            .iter()
+            .any(|error| matches!(error, PolicyError::HeadOfHouseholdNotSupported { .. }))
+        {
+            errors.push(PolicyError::HeadOfHouseholdNotSupported {
+                reason: "enter a dependent who lived with you more than half the year in a relationship TaxVault can screen for Head of Household".into(),
+            });
+        }
+    }
+
+    if facts.adjustments.traditional_ira_deduction > Decimal::ZERO {
+        errors.push(PolicyError::TraditionalIraDeductionNotSupported);
+    }
+
+    if facts.adjustments.hsa_deduction > Decimal::ZERO {
+        errors.push(PolicyError::HsaDeductionNotSupported);
+    }
+
     if errors.is_empty() {
         Ok(())
     } else {
         Err(errors)
     }
+}
+
+fn is_supported_hoh_qualifying_person_candidate(dependent: &Dependent) -> bool {
+    dependent.months_lived_in_home > 6
+        && matches!(
+            dependent.relationship,
+            DependentRelationship::Son
+                | DependentRelationship::Daughter
+                | DependentRelationship::Stepchild
+                | DependentRelationship::FosterChild
+                | DependentRelationship::Sibling
+                | DependentRelationship::StepSibling
+                | DependentRelationship::HalfSibling
+                | DependentRelationship::Grandchild
+                | DependentRelationship::Niece
+                | DependentRelationship::Nephew
+                | DependentRelationship::Grandparent
+        )
 }
 
 #[cfg(test)]
@@ -211,7 +273,19 @@ mod tests {
             interest_income: vec![],
             dividend_income: vec![],
             social_security_income: vec![],
+            estimated_tax_payments: Decimal::ZERO,
             adjustments: IncomeAdjustments::default(),
+        }
+    }
+
+    fn test_dependent(relationship: DependentRelationship, months_lived_in_home: u8) -> Dependent {
+        Dependent {
+            first_name: "Pat".into(),
+            last_name: "Dependent".into(),
+            ssn: Ssn::parse("400-02-0002").unwrap(),
+            date_of_birth: DateYmd::new(2016, 6, 15).unwrap(),
+            relationship,
+            months_lived_in_home,
         }
     }
 
@@ -282,6 +356,125 @@ mod tests {
             None,
             vec![test_w2(FilerRole::Primary, 60000)],
         );
+        assert!(validate_supported_slice(&facts, &test_rules()).is_ok());
+    }
+
+    #[test]
+    fn head_of_household_with_child_resident_case_is_supported() {
+        let mut facts = facts_with_w2s(
+            2025,
+            FilingStatus::HeadOfHousehold,
+            test_filer(1990),
+            None,
+            vec![test_w2(FilerRole::Primary, 60000)],
+        );
+        facts.dependents = vec![test_dependent(DependentRelationship::Daughter, 12)];
+
+        assert!(validate_supported_slice(&facts, &test_rules()).is_ok());
+    }
+
+    #[test]
+    fn head_of_household_parent_only_case_is_rejected() {
+        let mut facts = facts_with_w2s(
+            2025,
+            FilingStatus::HeadOfHousehold,
+            test_filer(1990),
+            None,
+            vec![test_w2(FilerRole::Primary, 60000)],
+        );
+        facts.dependents = vec![test_dependent(DependentRelationship::Parent, 12)];
+
+        let errs = validate_supported_slice(&facts, &test_rules()).unwrap_err();
+        assert!(errs.iter().any(|error| matches!(
+            error,
+            PolicyError::HeadOfHouseholdNotSupported { reason }
+            if reason.contains("dependent parent")
+        )));
+    }
+
+    #[test]
+    fn head_of_household_other_relationship_case_is_rejected() {
+        let mut facts = facts_with_w2s(
+            2025,
+            FilingStatus::HeadOfHousehold,
+            test_filer(1990),
+            None,
+            vec![test_w2(FilerRole::Primary, 60000)],
+        );
+        facts.dependents = vec![test_dependent(DependentRelationship::Other, 12)];
+
+        let errs = validate_supported_slice(&facts, &test_rules()).unwrap_err();
+        assert!(errs.iter().any(|error| matches!(
+            error,
+            PolicyError::HeadOfHouseholdNotSupported { reason }
+            if reason.contains("other")
+        )));
+    }
+
+    #[test]
+    fn head_of_household_requires_supported_resident_qualifying_person_candidate() {
+        let mut facts = facts_with_w2s(
+            2025,
+            FilingStatus::HeadOfHousehold,
+            test_filer(1990),
+            None,
+            vec![test_w2(FilerRole::Primary, 60000)],
+        );
+        facts.dependents = vec![test_dependent(DependentRelationship::Son, 6)];
+
+        let errs = validate_supported_slice(&facts, &test_rules()).unwrap_err();
+        assert!(errs.iter().any(|error| matches!(
+            error,
+            PolicyError::HeadOfHouseholdNotSupported { reason }
+            if reason.contains("more than half the year")
+        )));
+    }
+
+    #[test]
+    fn traditional_ira_deduction_is_rejected() {
+        let mut facts = facts_with_w2s(
+            2025,
+            FilingStatus::Single,
+            test_filer(1990),
+            None,
+            vec![test_w2(FilerRole::Primary, 60000)],
+        );
+        facts.adjustments.traditional_ira_deduction = Decimal::from(1000);
+
+        let errs = validate_supported_slice(&facts, &test_rules()).unwrap_err();
+        assert!(errs
+            .iter()
+            .any(|error| matches!(error, PolicyError::TraditionalIraDeductionNotSupported)));
+    }
+
+    #[test]
+    fn hsa_deduction_is_rejected() {
+        let mut facts = facts_with_w2s(
+            2025,
+            FilingStatus::Single,
+            test_filer(1990),
+            None,
+            vec![test_w2(FilerRole::Primary, 60000)],
+        );
+        facts.adjustments.hsa_deduction = Decimal::from(800);
+
+        let errs = validate_supported_slice(&facts, &test_rules()).unwrap_err();
+        assert!(errs
+            .iter()
+            .any(|error| matches!(error, PolicyError::HsaDeductionNotSupported)));
+    }
+
+    #[test]
+    fn student_loan_interest_adjustment_remains_supported() {
+        let mut facts = facts_with_w2s(
+            2025,
+            FilingStatus::Single,
+            test_filer(1990),
+            None,
+            vec![test_w2(FilerRole::Primary, 60000)],
+        );
+        facts.adjustments.student_loan_interest_paid = Decimal::from(2500);
+
         assert!(validate_supported_slice(&facts, &test_rules()).is_ok());
     }
 

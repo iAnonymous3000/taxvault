@@ -56,6 +56,11 @@ def parse_args():
         help="Fail if the checked-in CSV rows or verification metadata are invalid.",
     )
     parser.add_argument(
+        "--require-public-release-ready",
+        action="store_true",
+        help="When used with --check, also fail unless the tax table is ready for a public release gate.",
+    )
+    parser.add_argument(
         "--report",
         action="store_true",
         help="Print the current verification status, metadata, and row-check summary.",
@@ -467,6 +472,17 @@ def print_report(metadata, actual_rows, row_issues, metadata_issues):
             print(f"  - {issue}")
 
 
+def release_gate_issues(metadata, row_issues, metadata_issues, require_public_release_ready):
+    if not require_public_release_ready:
+        return []
+
+    _, public_state, reason = lock_status(metadata, row_issues, metadata_issues)
+    if public_state == "READY":
+        return []
+
+    return [f"public release gate is not satisfied: {reason}"]
+
+
 def main():
     args = parse_args()
     brackets = parse_tax_brackets(RULES_PATH)
@@ -496,7 +512,12 @@ def main():
         print_report(existing_metadata, actual_rows, row_issues, metadata_issues)
 
     if args.check:
-        issues = metadata_issues + row_issues
+        issues = metadata_issues + row_issues + release_gate_issues(
+            existing_metadata,
+            row_issues,
+            metadata_issues,
+            args.require_public_release_ready,
+        )
         if issues:
             for issue in issues:
                 print(issue, file=sys.stderr)

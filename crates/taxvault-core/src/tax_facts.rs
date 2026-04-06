@@ -2,6 +2,7 @@ use crate::filer::{
     Dependent, DividendIncome, FilerInfo, FilerRole, FilingStatus, IncomeAdjustments,
     InterestIncome, SocialSecurityIncome, W2Income,
 };
+use rust_decimal::Decimal;
 
 pub struct TaxFacts {
     pub tax_year: u16,
@@ -13,6 +14,7 @@ pub struct TaxFacts {
     pub interest_income: Vec<InterestIncome>,
     pub dividend_income: Vec<DividendIncome>,
     pub social_security_income: Vec<SocialSecurityIncome>,
+    pub estimated_tax_payments: Decimal,
     pub adjustments: IncomeAdjustments,
 }
 
