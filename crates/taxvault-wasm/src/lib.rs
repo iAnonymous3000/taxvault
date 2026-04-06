@@ -250,7 +250,8 @@ fn compute_tax_inner(json_input: &str) -> WasmResult {
         estimate_scope:
             "Narrow 2025 federal estimate for supported W-2, SSA-1099, 1099-INT, 1099-DIV, and limited above-the-line deduction scenarios only."
                 .into(),
-        privacy: "Runs entirely in your browser. Entered tax data stays on this page unless you choose to share it elsewhere."
+        privacy:
+            "Runs entirely in your browser. Drafts autosave in this tab by default, and device storage stays opt-in."
             .into(),
         scope_limits,
     };

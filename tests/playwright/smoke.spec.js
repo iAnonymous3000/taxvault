@@ -43,7 +43,8 @@ const mockResult = {
     tax_table_local_estimate_ready: true,
     tax_table_human_verified: false,
     estimate_scope: "Narrow supported-slice estimate",
-    privacy: "Runs entirely in your browser.",
+    privacy:
+      "Runs entirely in your browser. Drafts autosave in this tab by default, and device storage stays opt-in.",
     scope_limits: ["Estimate only."],
   },
   trace: "mock trace",
@@ -203,6 +204,17 @@ test("supported return becomes ready when the tax table allows local estimates",
   );
   const cautions = await page.locator("#supportReviewCautions li").allTextContents();
   expect(cautions.some((item) => item.includes("machine-checked"))).toBe(true);
+});
+
+test("landing page surfaces the public GitHub repo and privacy controls", async ({ page }) => {
+  await openApp(page);
+
+  const githubLink = page.getByRole("link", { name: "Open source on GitHub" });
+  await expect(githubLink).toBeVisible();
+  await expect(githubLink).toHaveAttribute("href", "https://github.com/iAnonymous3000/taxvault");
+  await expect(page.locator("#trustTitle")).toContainText("privacy and security");
+  await expect(page.getByText("Security headers in place")).toBeVisible();
+  await expect(page.getByText("Open source and auditable")).toBeVisible();
 });
 
 test("unsupported return shows a blocking issue before compute", async ({ page }) => {

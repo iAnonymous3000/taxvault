@@ -405,7 +405,7 @@ class WebSmokeTests(unittest.TestCase):
                 "tax_table_local_estimate_ready": True,
                 "tax_table_human_verified": False,
                 "estimate_scope": "Narrow supported-slice estimate",
-                "privacy": "Runs entirely in your browser.",
+                "privacy": "Runs entirely in your browser. Drafts autosave in this tab by default, and device storage stays opt-in.",
                 "scope_limits": ["Estimate only."],
             },
             "trace": "mock trace",

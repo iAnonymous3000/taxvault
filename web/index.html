@@ -26,6 +26,25 @@
       <span class="header-chip">No cloud upload required</span>
       <span class="header-chip">Estimate only, not filing</span>
     </div>
+    <div class="header-actions">
+      <a
+        class="header-link"
+        href="https://github.com/iAnonymous3000/taxvault"
+        target="_blank"
+        rel="noopener noreferrer"
+        aria-label="Open source on GitHub"
+      >
+        <svg
+          class="header-link-icon"
+          viewBox="0 0 24 24"
+          fill="currentColor"
+          aria-hidden="true"
+        >
+          <path d="M12 .297c-6.63 0-12 5.373-12 12 0 5.303 3.438 9.8 8.205 11.385.6.113.82-.258.82-.577 0-.285-.01-1.04-.015-2.04-3.338.724-4.042-1.61-4.042-1.61C4.422 18.07 3.633 17.7 3.633 17.7c-1.087-.744.084-.729.084-.729 1.205.084 1.838 1.236 1.838 1.236 1.07 1.835 2.809 1.305 3.495.998.108-.776.417-1.305.76-1.605-2.665-.3-5.466-1.332-5.466-5.93 0-1.31.465-2.38 1.235-3.22-.135-.303-.54-1.523.105-3.176 0 0 1.005-.322 3.3 1.23.96-.267 1.98-.399 3-.405 1.02.006 2.04.138 3 .405 2.28-1.552 3.285-1.23 3.285-1.23.645 1.653.24 2.873.12 3.176.765.84 1.23 1.91 1.23 3.22 0 4.61-2.805 5.625-5.475 5.92.42.36.81 1.096.81 2.22 0 1.606-.015 2.896-.015 3.286 0 .315.21.69.825.57C20.565 22.092 24 17.592 24 12.297c0-6.627-5.373-12-12-12"/>
+        </svg>
+        <span>Open source on GitHub</span>
+      </a>
+    </div>
   </div>
 </header>
 
@@ -49,11 +68,11 @@
         </p>
       </div>
       <aside class="gate-side-note" aria-label="Privacy summary">
-        <div class="gate-side-title">Why users trust it</div>
+        <div class="gate-side-title">Privacy defaults</div>
         <ul class="gate-side-list">
-          <li>Tax calculations run in this browser.</li>
-          <li>Your draft stays in this tab unless you choose device storage.</li>
-          <li>You can clear everything from the page at any time.</li>
+          <li>Tax calculations run entirely in this browser.</li>
+          <li>PDF and image references stay on screen only. TaxVault does not import their fields.</li>
+          <li>Drafts clear with this tab unless you opt into device storage.</li>
         </ul>
       </aside>
     </div>
@@ -148,10 +167,11 @@
       <div class="card-header">
         <div>
           <div class="notice-eyebrow">Privacy &amp; Security</div>
-          <h2 class="card-title" id="trustTitle">Make the privacy story obvious</h2>
+          <h2 class="card-title" id="trustTitle">What makes TaxVault different for privacy and security</h2>
           <p class="card-subtitle">
-            TaxVault stands out when people immediately understand what stays local and what stays
-            under their control.
+            TaxVault avoids the usual cloud tax-intake pattern: the estimate runs locally,
+            document references stay on screen only, device storage is opt-in, and the full
+            implementation is public for inspection.
           </p>
         </div>
       </div>
@@ -159,25 +179,43 @@
         <article class="trust-item">
           <h3 class="trust-item-title">Processed locally</h3>
           <p class="trust-item-copy">
-            Tax math runs in this browser using the local TaxVault engine.
+            Tax math runs in this browser through the bundled TaxVault engine instead of a remote
+            tax-prep session.
           </p>
         </article>
         <article class="trust-item">
-          <h3 class="trust-item-title">No cloud upload required</h3>
+          <h3 class="trust-item-title">No forced cloud intake</h3>
           <p class="trust-item-copy">
-            You can preview multiple local PDFs or images on screen without sending them away.
+            You can work through the estimate without creating an account or handing forms to a
+            hosted upload workflow.
           </p>
         </article>
         <article class="trust-item">
-          <h3 class="trust-item-title">You control retention</h3>
+          <h3 class="trust-item-title">On-screen reference only</h3>
+          <p class="trust-item-copy">
+            Local PDFs and images are there for visual review. TaxVault does not OCR, parse, or
+            import fields from reference files.
+          </p>
+        </article>
+        <article class="trust-item">
+          <h3 class="trust-item-title">Security headers in place</h3>
+          <p class="trust-item-copy">
+            The page ships with a strict Content Security Policy, a no-referrer policy, and device
+            permissions turned off.
+          </p>
+        </article>
+        <article class="trust-item">
+          <h3 class="trust-item-title">Retention is opt-in</h3>
           <p class="trust-item-copy" id="storageTrustCopy">
-            By default your draft stays only in this tab and clears when the tab closes.
+            Draft autosaves only in this tab by default. Turn on device storage only if you want
+            the draft to persist in this browser.
           </p>
         </article>
         <article class="trust-item">
-          <h3 class="trust-item-title">Clear any time</h3>
+          <h3 class="trust-item-title">Open source and auditable</h3>
           <p class="trust-item-copy">
-            Use Clear All Data to wipe names, SSNs, forms, and results from this device.
+            The repository, security policy, and release controls are public so anyone can inspect
+            how TaxVault handles sensitive data.
           </p>
         </article>
       </div>
