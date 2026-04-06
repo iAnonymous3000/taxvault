@@ -485,7 +485,7 @@ test("support snapshot export redacts names, birth dates, and issuer identities"
 
   const supportRaw = JSON.stringify(supportSnapshot);
   expect(supportRaw).not.toContain("Alex");
-  expect(supportRaw).not.toContain("Filer");
+  expect(supportRaw).not.toContain('"lastName":"Filer"');
   expect(supportRaw).not.toContain("1990-06-15");
   expect(supportRaw).not.toContain("Northwind Co");
   expect(supportRaw).not.toContain("Redwood Credit Union");

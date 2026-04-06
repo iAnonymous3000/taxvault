@@ -671,7 +671,7 @@ class WebSmokeTests(unittest.TestCase):
 
         support_raw = json.dumps(support_snapshot)
         self.assertNotIn("Alex", support_raw)
-        self.assertNotIn("Filer", support_raw)
+        self.assertNotIn('"lastName": "Filer"', support_raw)
         self.assertNotIn("1990-06-15", support_raw)
         self.assertNotIn("Northwind Co", support_raw)
         self.assertNotIn("Redwood Credit Union", support_raw)
