@@ -448,6 +448,13 @@ fn collect_input_cautions(facts: &TaxFacts) -> Vec<String> {
         );
     }
 
+    if facts.adjustments.student_loan_interest_paid > Decimal::ZERO {
+        push_unique(
+            &mut cautions,
+            "Student loan interest eligibility still needs manual confirmation. TaxVault applies the cap and MAGI phaseout, but it does not verify whether the loan was qualified, whether you were legally obligated to pay it, or whether someone else can claim you as a dependent.",
+        );
+    }
+
     if facts.filing_status == FilingStatus::HeadOfHousehold
         && facts.dependents.iter().any(|dependent| {
             matches!(
@@ -905,6 +912,51 @@ mod tests {
             .blocking_issues
             .iter()
             .any(|issue| issue.contains("Traditional IRA deduction estimates are not supported")));
+    }
+
+    #[test]
+    fn review_tax_input_surfaces_student_loan_interest_manual_check() {
+        let json = r#"
+        {
+          "input": {
+            "tax_year": 2025,
+            "filing_status": "single",
+            "primary_filer": {
+              "first_name": "Alex",
+              "last_name": "Filer",
+              "ssn": "400-01-0001",
+              "date_of_birth": "1990-06-15",
+              "is_blind": false,
+              "is_dependent": false
+            },
+            "spouse": null,
+            "w2_income": [{
+              "recipient": "primary",
+              "employer_name": "Northwind Co",
+              "employer_ein": "12-3456789",
+              "wages": 60000,
+              "federal_tax_withheld": 8000,
+              "state_tax_withheld": 0,
+              "social_security_wages": 60000,
+              "social_security_tax_withheld": 3720,
+              "medicare_wages": 60000,
+              "medicare_tax_withheld": 870
+            }],
+            "adjustments": {
+              "traditional_ira_deduction": 0,
+              "hsa_deduction": 0,
+              "student_loan_interest_paid": 2500
+            }
+          }
+        }
+        "#;
+
+        let review = review_tax_input_inner(json);
+        assert!(review.ready_for_estimate);
+        assert_eq!(review.status, "ready");
+        assert!(review.blocking_issues.is_empty());
+        assert!(review.cautions.iter().any(|caution| caution
+            .contains("Student loan interest eligibility still needs manual confirmation")));
     }
 
     #[test]

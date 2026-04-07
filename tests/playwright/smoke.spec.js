@@ -433,6 +433,22 @@ test("Traditional IRA deduction is blocked before compute", async ({ page }) => 
   await expect(page.locator("#computeBtn")).toBeDisabled();
 });
 
+test("student loan interest stays supported but surfaces a manual eligibility caution", async ({ page }) => {
+  await openApp(page);
+  await fillStep1Single(page);
+  await addSupportedW2(page);
+
+  await page.locator("#studentLoanInterestPaid").fill("2500");
+  await expect(page.locator("#supportReviewBadge")).toHaveText("Ready");
+  const cautions = await page.locator("#supportReviewCautions li").allTextContents();
+  expect(
+    cautions.some((item) =>
+      item.includes("Student loan interest eligibility still needs manual confirmation")
+    )
+  ).toBe(true);
+  await expect(page.locator("#computeBtn")).toBeEnabled();
+});
+
 test("draft 1040 preview renders printable mock results", async ({ page }) => {
   await openApp(page);
   await fillStep1Single(page);

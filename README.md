@@ -8,7 +8,17 @@ It is intentionally limited. The current product supports a small set of return 
 
 Tax Vault is open for review and collaboration as an estimate-only project.
 
-It is not approved for a public estimate release yet. The checked-in 2025 tax table is still `machine_checked`, not `human_verified`, so the repository's own release gate remains locked until a named reviewer records signoff.
+The repository currently supports local/private estimate runs because the checked-in 2025 tax table is `machine_checked`.
+
+It is not approved for a public estimate release yet. The public-release gate remains locked until a named reviewer records `human_verified` metadata for the embedded 2025 tax table and the release checklist is completed.
+
+Current recommendation: `NO-GO` for public release.
+
+Known release blockers:
+
+- `tax-table/federal_2025_table.csv` is still `machine_checked`, not `human_verified`
+- Head of Household and some deduction-eligibility paths still require manual review
+- The stronger public-release verification command must pass: `python3 scripts/verify_tax_table.py --report --check --require-public-release-ready`
 
 ## Important Warning
 
@@ -21,7 +31,7 @@ Do not use it to file a return, sign a tax document, or decide how much to pay t
 - Filing statuses: `Single`, `Married Filing Jointly`, `Head of Household` for resident qualifying-person cases TaxVault can screen from current inputs
 - Income: `W-2`, `SSA-1099`, `1099-INT`, `1099-DIV`
 - Standard deduction, including age 65+ and blindness adjustments
-- Student loan interest paid, subject to the 2025 cap and MAGI phaseout rules
+- Student loan interest paid, subject to the 2025 cap and MAGI phaseout rules, with manual eligibility confirmation still required
 - Estimated tax payments entered by the user (Form 1040 line 26)
 - Child Tax Credit and Credit for Other Dependents for entered dependents
 - Guided manual entry helpers for supported paper forms
@@ -76,28 +86,42 @@ There is currently no OCR/import flow for local PDFs or images and no cloud docu
 ## Prerequisites
 
 - Rust `1.94.1` or newer
-- Node.js `22` or newer plus npm
+- Python `3` or newer
+- Node.js `22` or newer plus npm (`24` is what CI uses)
 - `wasm-pack 0.14+` for rebuilding the browser bundle
 - A local static file server such as `python3 -m http.server`
 
 ## Local Development
 
-Run the full verification flow from the workspace root:
+For engine and rule-pack work, you can run the core Rust/Python verification flow from the workspace root:
+
+```sh
+cargo fmt --all --check
+cargo clippy --workspace --all-targets --all-features -- -D warnings
+cargo clippy --target wasm32-unknown-unknown -p taxvault-wasm -- -D warnings
+cargo test --workspace
+python3 -m unittest discover -s tests -p 'test_*.py'
+python3 scripts/verify_tax_table.py --report --check
+```
+
+For browser verification, install the Node dependencies and run:
 
 ```sh
 npm ci
-cargo fmt --all --check
-cargo clippy --workspace --all-targets --all-features -- -D warnings
-cargo test --workspace
-python3 -m unittest discover -s tests -p 'test_*.py'
 npm run check:web-js
-python3 scripts/verify_tax_table.py --report --check
 (cd crates/taxvault-wasm && wasm-pack build --target web --out-dir ../../web/pkg --release)
 npx playwright install chromium
 npm run test:web-smoke
 ```
 
 `npm ci` installs the Playwright test runner used for browser smoke coverage. `npx playwright install chromium` only needs to be repeated when the Playwright version changes or your local browser cache is cleared.
+
+If you want local verification to mirror CI more closely, also install `cargo-audit` and run:
+
+```sh
+cargo install cargo-audit --locked
+cargo audit
+```
 
 ## Rebuild The Web Bundle
 
@@ -151,6 +175,12 @@ Tax Vault is still an estimate-only product, not filing-grade software.
 
 The checked-in 2025 tax table is currently marked `machine_checked` in `tax-table/federal_2025_table.csv`. That enables local/private estimate calculations, but a named reviewer still needs to record `human_verified` metadata before any public estimate release should be considered.
 
+Before any public estimate release, the stronger repository gate must pass:
+
+```sh
+python3 scripts/verify_tax_table.py --report --check --require-public-release-ready
+```
+
 Use these docs before any public release:
 
 - `docs/production-readiness.md`
@@ -171,6 +201,8 @@ To use it:
 4. Wait for the `Deploy Pages` workflow to finish
 
 The deploy workflow now runs after the `CI` workflow succeeds on `main`, so the published Pages artifact tracks the exact commit that passed automated checks.
+
+The Pages build also enforces `python3 scripts/verify_tax_table.py --report --check --require-public-release-ready`, so it will refuse to publish while the embedded tax table remains `machine_checked`.
 
 The site will usually be published at:
 

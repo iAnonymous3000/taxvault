@@ -8,7 +8,7 @@ Reason:
 
 - Tax Vault is intentionally scoped as a narrow 2025 federal estimate tool.
 - The embedded 2025 tax table is currently marked `machine_checked`, not `human_verified`.
-- Head of Household and some deduction eligibility checks still require manual review.
+- Head of Household and student loan interest eligibility checks still require manual review.
 
 ## Estimate-Only Release Gate
 
