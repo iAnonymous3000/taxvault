@@ -46,6 +46,19 @@ struct WasmResult {
     trace: Option<String>,
 }
 
+impl WasmResult {
+    fn err(message: impl Into<String>) -> Self {
+        Self {
+            success: false,
+            error: Some(message.into()),
+            summary: None,
+            form: None,
+            meta: None,
+            trace: None,
+        }
+    }
+}
+
 #[derive(Serialize)]
 struct TaxSummary {
     tax_year: u16,
@@ -144,58 +157,30 @@ fn compute_tax_inner(json_input: &str) -> WasmResult {
     let facts = match load_tax_facts(json_input) {
         Ok(f) => f,
         Err(e) => {
-            return WasmResult {
-                success: false,
-                error: Some(format!("Input error: {e}")),
-                summary: None,
-                form: None,
-                meta: None,
-                trace: None,
-            }
+            return WasmResult::err(format!("Input error: {e}"));
         }
     };
 
     let rules = match embedded_rule_pack_for_year(facts.tax_year) {
         Ok(rules) => rules,
         Err(error) => {
-            return WasmResult {
-                success: false,
-                error: Some(format!("Rule pack error: {error}")),
-                summary: None,
-                form: None,
-                meta: None,
-                trace: None,
-            }
+            return WasmResult::err(format!("Rule pack error: {error}"));
         }
     };
 
     // Structural validation
     if let Err(errs) = facts.validate_structure() {
         let msgs: Vec<String> = errs.iter().map(|e| e.to_string()).collect();
-        return WasmResult {
-            success: false,
-            error: Some(format_error_list("Please fix these input issues:", &msgs)),
-            summary: None,
-            form: None,
-            meta: None,
-            trace: None,
-        };
+        return WasmResult::err(format_error_list("Please fix these input issues:", &msgs));
     }
 
     // Policy validation
     if let Err(errs) = validate_supported_slice(&facts, rules) {
         let msgs: Vec<String> = errs.iter().map(|e| e.to_string()).collect();
-        return WasmResult {
-            success: false,
-            error: Some(format_error_list(
+        return WasmResult::err(format_error_list(
                 "This return is outside TaxVault's supported estimate slice:",
                 &msgs,
-            )),
-            summary: None,
-            form: None,
-            meta: None,
-            trace: None,
-        };
+            ));
     }
 
     if !rules
@@ -203,17 +188,10 @@ fn compute_tax_inner(json_input: &str) -> WasmResult {
         .table_verification_status
         .allows_estimate_compute()
     {
-        return WasmResult {
-            success: false,
-            error: Some(format!(
+        return WasmResult::err(format!(
                 "TaxVault is locked because the embedded {} federal tax table is still unverified. Mark it machine_checked for local/private estimates or human_verified for public-release signoff.",
                 rules.meta.tax_year
-            )),
-            summary: None,
-            form: None,
-            meta: None,
-            trace: None,
-        };
+            ));
     }
 
     // Fail closed if a future embedded tax table is neither machine-checked nor human-verified.
@@ -221,14 +199,7 @@ fn compute_tax_inner(json_input: &str) -> WasmResult {
     let result = match compute(&facts, rules, &options) {
         Ok(r) => r,
         Err(e) => {
-            return WasmResult {
-                success: false,
-                error: Some(format!("Computation error: {e}")),
-                summary: None,
-                form: None,
-                meta: None,
-                trace: None,
-            }
+            return WasmResult::err(format!("Computation error: {e}"));
         }
     };
 
