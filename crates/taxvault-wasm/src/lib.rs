@@ -272,6 +272,7 @@ fn compute_tax_inner(json_input: &str) -> WasmResult {
         "Does not support EIC, itemized deductions, pensions, IRA distributions, Schedule C, capital gains schedules, ACA credits, or most other federal schedules."
             .into(),
         "Traditional IRA and HSA deductions are outside the supported estimate slice because TaxVault does not collect employer-plan coverage, HDHP eligibility, annual limits, or excess-contribution details.".into(),
+        "Student loan interest is only supported after you confirm the interest was paid on a qualified education loan you were legally obligated to pay.".into(),
         "Head of Household and dependency qualification rules are not fully verified by the app. Parent-based and 'other' dependent HOH cases are blocked outside the supported slice.".into(),
     ];
 
@@ -448,13 +449,6 @@ fn collect_input_cautions(facts: &TaxFacts) -> Vec<String> {
         );
     }
 
-    if facts.adjustments.student_loan_interest_paid > Decimal::ZERO {
-        push_unique(
-            &mut cautions,
-            "Student loan interest eligibility still needs manual confirmation. TaxVault applies the cap and MAGI phaseout, but it does not verify whether the loan was qualified, whether you were legally obligated to pay it, or whether someone else can claim you as a dependent.",
-        );
-    }
-
     if facts.filing_status == FilingStatus::HeadOfHousehold
         && facts.dependents.iter().any(|dependent| {
             matches!(
@@ -605,11 +599,12 @@ mod tests {
 
     #[test]
     fn embedded_rule_pack_allows_local_estimates() {
-        let rules = embedded_rule_pack_for_year(2025).expect("embedded rule pack should load");
-        assert!(rules
+        let rules = embedded_rule_pack_for_year(2025);
+        assert!(rules.is_ok());
+        assert!(rules.as_ref().is_ok_and(|rule_pack| rule_pack
             .meta
             .table_verification_status
-            .allows_estimate_compute());
+            .allows_estimate_compute()));
     }
 
     #[test]
@@ -915,7 +910,7 @@ mod tests {
     }
 
     #[test]
-    fn review_tax_input_surfaces_student_loan_interest_manual_check() {
+    fn review_tax_input_rejects_student_loan_interest_without_attestations() {
         let json = r#"
         {
           "input": {
@@ -952,11 +947,106 @@ mod tests {
         "#;
 
         let review = review_tax_input_inner(json);
+        assert!(!review.ready_for_estimate);
+        assert_eq!(review.status, "unsupported");
+        assert!(review
+            .blocking_issues
+            .iter()
+            .any(|issue| issue.contains("qualified education loan")));
+        assert!(review
+            .blocking_issues
+            .iter()
+            .any(|issue| issue.contains("legally obligated")));
+    }
+
+    #[test]
+    fn review_tax_input_allows_student_loan_interest_after_attestations() {
+        let json = r#"
+        {
+          "input": {
+            "tax_year": 2025,
+            "filing_status": "single",
+            "primary_filer": {
+              "first_name": "Alex",
+              "last_name": "Filer",
+              "ssn": "400-01-0001",
+              "date_of_birth": "1990-06-15",
+              "is_blind": false,
+              "is_dependent": false
+            },
+            "spouse": null,
+            "w2_income": [{
+              "recipient": "primary",
+              "employer_name": "Northwind Co",
+              "employer_ein": "12-3456789",
+              "wages": 60000,
+              "federal_tax_withheld": 8000,
+              "state_tax_withheld": 0,
+              "social_security_wages": 60000,
+              "social_security_tax_withheld": 3720,
+              "medicare_wages": 60000,
+              "medicare_tax_withheld": 870
+            }],
+            "adjustments": {
+              "traditional_ira_deduction": 0,
+              "hsa_deduction": 0,
+              "student_loan_interest_paid": 2500,
+              "student_loan_interest_is_qualified_loan": true,
+              "student_loan_interest_is_legally_obligated": true
+            }
+          }
+        }
+        "#;
+
+        let review = review_tax_input_inner(json);
         assert!(review.ready_for_estimate);
         assert_eq!(review.status, "ready");
         assert!(review.blocking_issues.is_empty());
-        assert!(review.cautions.iter().any(|caution| caution
-            .contains("Student loan interest eligibility still needs manual confirmation")));
+        assert!(!review
+            .cautions
+            .iter()
+            .any(|caution| caution.contains("Student loan interest")));
+    }
+
+    #[test]
+    fn review_tax_input_reports_dependent_filer_as_unsupported() {
+        let json = r#"
+        {
+          "input": {
+            "tax_year": 2025,
+            "filing_status": "single",
+            "primary_filer": {
+              "first_name": "Alex",
+              "last_name": "Filer",
+              "ssn": "400-01-0001",
+              "date_of_birth": "1990-06-15",
+              "is_blind": false,
+              "is_dependent": true
+            },
+            "spouse": null,
+            "w2_income": [{
+              "recipient": "primary",
+              "employer_name": "Northwind Co",
+              "employer_ein": "12-3456789",
+              "wages": 60000,
+              "federal_tax_withheld": 8000,
+              "state_tax_withheld": 0,
+              "social_security_wages": 60000,
+              "social_security_tax_withheld": 3720,
+              "medicare_wages": 60000,
+              "medicare_tax_withheld": 870
+            }]
+          }
+        }
+        "#;
+
+        let review = review_tax_input_inner(json);
+        assert!(!review.ready_for_estimate);
+        assert_eq!(review.status, "unsupported");
+        assert!(review
+            .blocking_issues
+            .iter()
+            .any(|issue| issue.contains("claimed as dependents")));
     }
 
     #[test]

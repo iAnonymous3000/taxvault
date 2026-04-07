@@ -127,7 +127,7 @@
             <ul class="welcome-list">
               <li>W-2, SSA-1099, 1099-INT, or 1099-DIV forms if you have them.</li>
               <li>Names, SSNs, and dates of birth for people on the return.</li>
-              <li>Known student loan interest paid or estimated federal tax payments if they apply.</li>
+              <li>Whether someone else can claim you as a dependent, plus any student loan interest or estimated tax payments you want to include.</li>
             </ul>
           </section>
         </div>
@@ -147,7 +147,7 @@
             <li>Single, Married Filing Jointly, or Head of Household returns with a resident qualifying person the app can screen.</li>
             <li>W-2 wages, SSA-1099 benefits, 1099-INT interest, and 1099-DIV dividends.</li>
             <li>Standard deduction with age 65+ or blindness adjustments.</li>
-            <li>Student loan interest paid and estimated federal tax payments you already know.</li>
+            <li>Student loan interest you can confirm was for a qualified loan you were legally obligated to pay, plus estimated federal tax payments you already know.</li>
             <li>Dependents entered for child and dependent credit estimates.</li>
           </ul>
         </section>
@@ -385,6 +385,10 @@
             <input id="pBlind" type="checkbox">
             <span>I am blind</span>
           </label>
+          <label class="checkbox-field" for="pDependent">
+            <input id="pDependent" type="checkbox">
+            <span>Someone else can claim me as a dependent for 2025</span>
+          </label>
         </div>
       </div>
 
@@ -433,6 +437,10 @@
             <input id="sBlind" type="checkbox">
             <span>Spouse is blind</span>
           </label>
+          <label class="checkbox-field" for="sDependent">
+            <input id="sDependent" type="checkbox">
+            <span>Someone else can claim my spouse as a dependent for 2025</span>
+          </label>
         </div>
       </div>
 
@@ -441,7 +449,8 @@
           <h2 class="card-title">Dependents</h2>
           <p class="card-subtitle" id="dependentSubtitle">
             Add any dependents you plan to claim. Head of Household requires at least one
-            dependent, and child-related credits only apply to qualifying children under age 17.
+            dependent, and parent-based and "other" Head of Household cases are outside the
+            supported slice here.
           </p>
         </div>
         <div id="dependentContainer"></div>
@@ -684,9 +693,10 @@
         <div class="card-header">
           <h2 class="card-title">Adjustments and Other Federal Payments</h2>
           <p class="card-subtitle">
-            Student loan interest and estimated tax payments are supported here. Nonzero
-            Traditional IRA and HSA deduction entries are currently blocked because TaxVault does
-            not collect the eligibility details needed to verify them.
+            Student loan interest and estimated tax payments are supported here. If you enter
+            student loan interest, confirm it was for a qualified loan you were legally obligated
+            to pay. Nonzero Traditional IRA and HSA deduction entries are currently blocked because
+            TaxVault does not collect the eligibility details needed to verify them.
           </p>
         </div>
         <div class="row">
@@ -739,9 +749,22 @@
             >
           </div>
         </div>
+        <div class="checkbox-row">
+          <label class="checkbox-field" for="studentLoanQualifiedLoan">
+            <input id="studentLoanQualifiedLoan" type="checkbox">
+            <span>The interest was paid on a qualified student loan</span>
+          </label>
+          <label class="checkbox-field" for="studentLoanLegallyObligated">
+            <input id="studentLoanLegallyObligated" type="checkbox">
+            <span>I was legally obligated to pay that loan</span>
+          </label>
+        </div>
+        <div class="field-hint">
+          Required only when the Student Loan Interest Paid amount is greater than zero.
+        </div>
         <div class="inline-note">
-          TaxVault applies the 2025 student loan interest cap and MAGI phaseout automatically.
-          Estimated tax payments flow to Form 1040 line 26.
+          TaxVault applies the 2025 student loan interest cap and MAGI phaseout automatically
+          after those confirmations. Estimated tax payments flow to Form 1040 line 26.
         </div>
       </div>
       <div class="actions">

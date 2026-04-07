@@ -21,7 +21,7 @@ jobs:
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
         with:
-          components: rustfmt, clippy
+          components: rustfmt, clippy, llvm-tools-preview
           targets: wasm32-unknown-unknown
 
       - name: Cache Rust artifacts
@@ -44,6 +44,20 @@ jobs:
 
       - name: Run tests
         run: cargo test --workspace
+
+      - name: Install cargo-llvm-cov
+        uses: taiki-e/install-action@cargo-llvm-cov
+
+      - name: Generate Rust coverage report
+        run: |
+          mkdir -p coverage
+          cargo llvm-cov --workspace --lcov --output-path coverage/rust.lcov
+
+      - name: Upload Rust coverage artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: rust-coverage-lcov
+          path: coverage/rust.lcov
 
       - name: Run verification script unit tests
         run: python3 -m unittest discover -s tests -p 'test_*.py'
@@ -80,7 +94,7 @@ jobs:
         run: npm ci
 
       - name: Install Playwright browser
-        run: npx playwright install --with-deps chromium
+        run: npx playwright install --with-deps chromium firefox webkit
 
       - name: Install wasm-pack
         run: cargo install wasm-pack --locked

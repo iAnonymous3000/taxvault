@@ -102,6 +102,10 @@ pub struct AdjustmentsDto {
     pub hsa_deduction: Decimal,
     #[serde(default)]
     pub student_loan_interest_paid: Decimal,
+    #[serde(default)]
+    pub student_loan_interest_is_qualified_loan: bool,
+    #[serde(default)]
+    pub student_loan_interest_is_legally_obligated: bool,
 }
 
 // ---- Rule Pack DTOs ----

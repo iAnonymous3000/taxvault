@@ -98,6 +98,7 @@ const legacySnapshot = {
     ssn: "400-01-0001",
     dob: "1990-06-15",
     isBlind: false,
+    isDependent: false,
   },
   spouse: {
     firstName: "",
@@ -105,11 +106,14 @@ const legacySnapshot = {
     ssn: "",
     dob: "",
     isBlind: false,
+    isDependent: false,
   },
   adjustments: {
     traditionalIraDeduction: "",
     hsaDeduction: "",
     studentLoanInterestPaid: "",
+    studentLoanQualifiedLoan: false,
+    studentLoanLegallyObligated: false,
   },
   dependents: [],
   w2s: [
@@ -151,6 +155,7 @@ const richImportEnvelope = {
       ssn: "",
       dob: "1990-06-15",
       isBlind: false,
+      isDependent: false,
     },
     spouse: {
       firstName: "",
@@ -158,11 +163,14 @@ const richImportEnvelope = {
       ssn: "",
       dob: "",
       isBlind: false,
+      isDependent: false,
     },
     adjustments: {
       traditionalIraDeduction: "",
       hsaDeduction: "",
       studentLoanInterestPaid: "",
+      studentLoanQualifiedLoan: false,
+      studentLoanLegallyObligated: false,
     },
     dependents: [
       {
@@ -330,6 +338,34 @@ test("draft status shows the last saved time and clear fields resets a W-2 card"
   await expect(page.locator("#storageStatus")).toContainText("Last saved");
 });
 
+test("Clear All Data removes TaxVault drafts from every storage bucket", async ({ page }) => {
+  await openApp(page);
+  await page.locator("#pFirst").fill("Alex");
+  await page.locator("#pLast").fill("Filer");
+
+  await page.evaluate(() => {
+    window.localStorage.setItem("taxvault:draft:local:2024", "legacy-local");
+    window.localStorage.setItem("taxvault:draft:remember:2024", "true");
+    window.localStorage.setItem("taxvault:draft:local:2025", "current-local");
+    window.sessionStorage.setItem("taxvault:draft:session:2024", "legacy-session");
+    window.sessionStorage.setItem("taxvault:draft:session:2025", "current-session");
+    window.sessionStorage.setItem("taxvault:active-tax-year", "2025");
+  });
+
+  page.once("dialog", (dialog) => dialog.accept());
+  await page.locator("#clearAllBtn").click();
+
+  await expect(page.locator("#app")).toHaveClass(/hidden/);
+  await expect(page.locator("#storageStatus")).toContainText("Saved draft cleared");
+
+  const remainingKeys = await page.evaluate(() => ({
+    local: Object.keys(window.localStorage).filter((key) => key.startsWith("taxvault:")),
+    session: Object.keys(window.sessionStorage).filter((key) => key.startsWith("taxvault:")),
+  }));
+  expect(remainingKeys.local).toEqual([]);
+  expect(remainingKeys.session).toEqual([]);
+});
+
 test("landing page surfaces the public GitHub repo and privacy controls", async ({ page }) => {
   await openApp(page);
 
@@ -372,6 +408,15 @@ test("step indicator marks the active step with aria-current=step", async ({ pag
   await expect(page.locator("#lbl2")).toHaveAttribute("aria-current", "step");
 });
 
+test("required fields show inline validation on blur", async ({ page }) => {
+  await openApp(page);
+
+  await page.locator("#pFirst").focus();
+  await page.locator("#pLast").focus();
+
+  await expect(page.locator("#pFirst-error")).toHaveText("Required");
+});
+
 test("unsupported return shows a blocking issue before compute", async ({ page }) => {
   await openApp(page);
   await fillStep1Single(page);
@@ -396,7 +441,22 @@ test("unsupported return shows a blocking issue before compute", async ({ page }
   await expect(page.locator("#computeBtn")).toBeDisabled();
 });
 
-test("Head of Household parent case is blocked before compute", async ({ page }) => {
+test("dependent filer is blocked before the income step", async ({ page }) => {
+  await openApp(page);
+  await page.locator("#pFirst").fill("Alex");
+  await page.locator("#pLast").fill("Filer");
+  await page.locator("#pSsn").fill("400-01-0001");
+  await page.locator("#pDob").fill("1990-06-15");
+  await page.locator("#pDependent").check();
+  await page.locator("#step1ContinueBtn").click();
+
+  await expect(page.locator("#step1")).toHaveClass(/active/);
+  await expect(page.locator("#error")).toContainText(
+    "TaxVault does not support filers who can be claimed as dependents on another return."
+  );
+});
+
+test("Head of Household parent case is blocked before the income step", async ({ page }) => {
   await openApp(page);
   await page.locator('.status-option[data-status="head_of_household"]').click();
   await page.locator("#pFirst").fill("Alex");
@@ -410,13 +470,10 @@ test("Head of Household parent case is blocked before compute", async ({ page })
   await page.locator("#dep-1-relationship").selectOption("parent");
   await page.locator("#dep-1-months").fill("12");
   await page.locator("#step1ContinueBtn").click();
-  await expect(page.locator("#step2")).toHaveClass(/active/);
-
-  await addSupportedW2(page);
-  await expect(page.locator("#supportReviewBadge")).toHaveText("Unsupported");
-  const issues = await page.locator("#supportReviewIssues li").allTextContents();
-  expect(issues.some((item) => item.includes("dependent parent"))).toBe(true);
-  await expect(page.locator("#computeBtn")).toBeDisabled();
+  await expect(page.locator("#step1")).toHaveClass(/active/);
+  await expect(page.locator("#error")).toContainText(
+    "Head of Household with only a dependent parent is outside TaxVault's supported estimate slice."
+  );
 });
 
 test("Traditional IRA deduction is blocked before compute", async ({ page }) => {
@@ -433,20 +490,50 @@ test("Traditional IRA deduction is blocked before compute", async ({ page }) => 
   await expect(page.locator("#computeBtn")).toBeDisabled();
 });
 
-test("student loan interest stays supported but surfaces a manual eligibility caution", async ({ page }) => {
+test("student loan interest requires eligibility attestations before it becomes ready", async ({
+  page,
+}) => {
   await openApp(page);
   await fillStep1Single(page);
   await addSupportedW2(page);
 
   await page.locator("#studentLoanInterestPaid").fill("2500");
-  await expect(page.locator("#supportReviewBadge")).toHaveText("Ready");
-  const cautions = await page.locator("#supportReviewCautions li").allTextContents();
+  await expect(page.locator("#supportReviewBadge")).toHaveText("Needs Attention");
+  const issues = await page.locator("#supportReviewIssues li").allTextContents();
   expect(
-    cautions.some((item) =>
-      item.includes("Student loan interest eligibility still needs manual confirmation")
+    issues.some((item) =>
+      item.includes("Confirm the student loan interest was paid on a qualified student loan")
     )
   ).toBe(true);
+  expect(
+    issues.some((item) =>
+      item.includes("Confirm you were legally obligated to pay that student loan")
+    )
+  ).toBe(true);
+  await expect(page.locator("#computeBtn")).toBeDisabled();
+
+  await page.locator("#studentLoanQualifiedLoan").check();
+  await page.locator("#studentLoanLegallyObligated").check();
+  await expect(page.locator("#supportReviewBadge")).toHaveText("Ready");
   await expect(page.locator("#computeBtn")).toBeEnabled();
+});
+
+test("reference uploads reject spoofed PDF content", async ({ page }) => {
+  await openApp(page);
+  await fillStep1Single(page);
+  await page.locator("#addW2Btn").click();
+
+  const fileInput = page.locator("#w2Container .upload-zone input[type=file]").first();
+  await fileInput.setInputFiles({
+    name: "spoofed.pdf",
+    mimeType: "application/pdf",
+    buffer: Buffer.from("this is not actually a pdf"),
+  });
+
+  await expect(page.locator("#w2Container .upload-feedback").first()).toContainText(
+    "did not match a supported PDF or image signature"
+  );
+  await expect(page.locator("#w2Container .upload-preview-card")).toHaveCount(0);
 });
 
 test("draft 1040 preview renders printable mock results", async ({ page }) => {
@@ -628,6 +715,65 @@ test("draft export and import round-trip through the versioned envelope", async 
   expect(storedDraft.type).toBe("taxvault-draft");
   expect(storedDraft.version).toBe(2);
   expect(storedDraft.taxYear).toBe(2025);
+});
+
+test("draft export shows an error if the browser blocks the download", async ({ page }) => {
+  await openApp(page);
+  await page.locator("#pFirst").fill("Alex");
+  await page.locator("#pLast").fill("Filer");
+
+  await page.evaluate(() => {
+    window.URL.createObjectURL = () => {
+      throw new Error("Download blocked by browser");
+    };
+  });
+
+  await page.locator("#exportDraftBtn").click();
+  await expect(page.locator("#error")).toContainText(
+    "Could not start the draft export download. Download blocked by browser"
+  );
+  await expect(page.locator("#storageStatus")).not.toContainText("Draft exported.");
+});
+
+test("imported draft can be completed and recomputed after re-entering SSNs and EINs", async ({
+  page,
+}) => {
+  await openApp(page);
+  await fillStep1Single(page);
+  await addSupportedW2(page);
+
+  const exportedDraft = await page.evaluate(() => {
+    if (!window.__taxvaultTesting) {
+      return null;
+    }
+
+    return window.__taxvaultTesting.exportCurrentDraftEnvelope();
+  });
+  expect(exportedDraft).not.toBeNull();
+
+  await page.evaluate(() => {
+    window.localStorage.clear();
+    window.sessionStorage.clear();
+  });
+  await page.reload();
+  await expect(page.locator("#loading")).toHaveClass(/hidden/);
+  await page.locator("#gateAcknowledge").check();
+  await page.locator("#gateContinueBtn").click();
+
+  await page.locator("#importDraftInput").setInputFiles({
+    name: "taxvault-roundtrip.json",
+    mimeType: "application/json",
+    buffer: Buffer.from(JSON.stringify(exportedDraft)),
+  });
+
+  await page.locator("#pSsn").fill("400-01-0001");
+  await page.locator("#step1ContinueBtn").click();
+  await expect(page.locator("#step2")).toHaveClass(/active/);
+  await page.locator("#w2-1-ein").fill("12-3456789");
+
+  await waitForReadyReview(page);
+  await page.locator("#computeBtn").click();
+  await expect(page.locator("#step3")).toHaveClass(/active/);
 });
 
 test("draft import replaces existing cards instead of duplicating them", async ({ page }) => {

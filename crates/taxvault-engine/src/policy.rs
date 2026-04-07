@@ -125,6 +125,20 @@ pub fn validate_supported_slice(
         errors.push(PolicyError::HsaDeductionNotSupported);
     }
 
+    if facts.adjustments.student_loan_interest_paid > Decimal::ZERO {
+        if !facts.adjustments.student_loan_interest_is_qualified_loan {
+            errors.push(PolicyError::StudentLoanInterestNotSupported {
+                reason: "confirm the interest was paid on a qualified education loan".into(),
+            });
+        }
+
+        if !facts.adjustments.student_loan_interest_is_legally_obligated {
+            errors.push(PolicyError::StudentLoanInterestNotSupported {
+                reason: "confirm you were legally obligated to pay the loan".into(),
+            });
+        }
+    }
+
     if errors.is_empty() {
         Ok(())
     } else {
@@ -474,8 +488,50 @@ mod tests {
             vec![test_w2(FilerRole::Primary, 60000)],
         );
         facts.adjustments.student_loan_interest_paid = Decimal::from(2500);
+        facts.adjustments.student_loan_interest_is_qualified_loan = true;
+        facts.adjustments.student_loan_interest_is_legally_obligated = true;
 
         assert!(validate_supported_slice(&facts, &test_rules()).is_ok());
+    }
+
+    #[test]
+    fn student_loan_interest_requires_qualified_loan_confirmation() {
+        let mut facts = facts_with_w2s(
+            2025,
+            FilingStatus::Single,
+            test_filer(1990),
+            None,
+            vec![test_w2(FilerRole::Primary, 60000)],
+        );
+        facts.adjustments.student_loan_interest_paid = Decimal::from(2500);
+        facts.adjustments.student_loan_interest_is_legally_obligated = true;
+
+        let errs = validate_supported_slice(&facts, &test_rules()).unwrap_err();
+        assert!(errs.iter().any(|error| matches!(
+            error,
+            PolicyError::StudentLoanInterestNotSupported { reason }
+            if reason.contains("qualified education loan")
+        )));
+    }
+
+    #[test]
+    fn student_loan_interest_requires_legal_obligation_confirmation() {
+        let mut facts = facts_with_w2s(
+            2025,
+            FilingStatus::Single,
+            test_filer(1990),
+            None,
+            vec![test_w2(FilerRole::Primary, 60000)],
+        );
+        facts.adjustments.student_loan_interest_paid = Decimal::from(2500);
+        facts.adjustments.student_loan_interest_is_qualified_loan = true;
+
+        let errs = validate_supported_slice(&facts, &test_rules()).unwrap_err();
+        assert!(errs.iter().any(|error| matches!(
+            error,
+            PolicyError::StudentLoanInterestNotSupported { reason }
+            if reason.contains("legally obligated")
+        )));
     }
 
     #[test]

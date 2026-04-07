@@ -52,6 +52,8 @@ fn convert_tax_facts(dto: TaxFactsDto) -> Result<TaxFacts, LoaderError> {
         traditional_ira_deduction: Decimal::ZERO,
         hsa_deduction: Decimal::ZERO,
         student_loan_interest_paid: Decimal::ZERO,
+        student_loan_interest_is_qualified_loan: false,
+        student_loan_interest_is_legally_obligated: false,
     }));
 
     Ok(TaxFacts {
@@ -175,6 +177,8 @@ fn convert_adjustments(dto: AdjustmentsDto) -> IncomeAdjustments {
         traditional_ira_deduction: dto.traditional_ira_deduction,
         hsa_deduction: dto.hsa_deduction,
         student_loan_interest_paid: dto.student_loan_interest_paid,
+        student_loan_interest_is_qualified_loan: dto.student_loan_interest_is_qualified_loan,
+        student_loan_interest_is_legally_obligated: dto.student_loan_interest_is_legally_obligated,
     }
 }
 

@@ -17,7 +17,7 @@ Current recommendation: `NO-GO` for public release.
 Known release blockers:
 
 - `tax-table/federal_2025_table.csv` is still `machine_checked`, not `human_verified`
-- Head of Household and some deduction-eligibility paths still require manual review
+- `docs/release-checklist.md` still needs named approvers, sign-off dates, and the deployed commit SHA
 - The stronger public-release verification command must pass: `python3 scripts/verify_tax_table.py --report --check --require-public-release-ready`
 
 ## Important Warning
@@ -31,7 +31,7 @@ Do not use it to file a return, sign a tax document, or decide how much to pay t
 - Filing statuses: `Single`, `Married Filing Jointly`, `Head of Household` for resident qualifying-person cases TaxVault can screen from current inputs
 - Income: `W-2`, `SSA-1099`, `1099-INT`, `1099-DIV`
 - Standard deduction, including age 65+ and blindness adjustments
-- Student loan interest paid, subject to the 2025 cap and MAGI phaseout rules, with manual eligibility confirmation still required
+- Student loan interest paid, subject to the 2025 cap and MAGI phaseout rules, after the filer confirms it was for a qualified loan they were legally obligated to pay
 - Estimated tax payments entered by the user (Form 1040 line 26)
 - Child Tax Credit and Credit for Other Dependents for entered dependents
 - Guided manual entry helpers for supported paper forms
@@ -53,6 +53,7 @@ Do not use it to file a return, sign a tax document, or decide how much to pay t
 - ACA credits
 - Most federal forms and schedules outside the supported slice
 - Head of Household cases that depend on a parent or an `other` relationship rather than a resident qualifying person TaxVault can screen
+- Returns where someone else can claim the filer or spouse as a dependent
 - OCR or importing fields from uploaded PDFs/images
 - Filing-ready review
 - Official IRS form PDFs ready for filing
@@ -116,6 +117,13 @@ npm run test:web-smoke
 
 `npm ci` installs the Playwright test runner used for browser smoke coverage. `npx playwright install chromium` only needs to be repeated when the Playwright version changes or your local browser cache is cleared.
 
+If you want the local browser smoke suite to match CI's cross-browser coverage, install the extra browsers and opt in explicitly:
+
+```sh
+npx playwright install firefox webkit
+PLAYWRIGHT_ALL_BROWSERS=1 npm run test:web-smoke
+```
+
 If you want local verification to mirror CI more closely, also install `cargo-audit` and run:
 
 ```sh
@@ -151,7 +159,7 @@ They currently cover:
 
 - the disclaimer gate and supported W-2 readiness when the tax table is machine-checked
 - pre-compute unsupported-case blocking for Additional Medicare Tax
-- Head of Household manual-review cautions alongside machine-check trust warnings
+- Head of Household scope blocking before income entry alongside machine-check trust warnings
 - legacy draft restore with SSN and EIN redaction
 - support snapshot export redaction for shareable debugging artifacts
 - printable draft Form 1040 preview rendering
@@ -167,7 +175,7 @@ cd ../..
 npm run test:web-smoke
 ```
 
-The Playwright runner starts a local static server automatically and exercises the built `web/` bundle in Chromium.
+The Playwright runner starts a local static server automatically and exercises the built `web/` bundle in Chromium by default. CI also runs the same suite in Firefox and WebKit.
 
 ## Critical Software Controls
 

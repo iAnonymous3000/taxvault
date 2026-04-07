@@ -27,8 +27,8 @@ Use this checklist for any public estimate release.
 - Run `npm run check:web-js`
 - Run `python3 scripts/verify_tax_table.py --report --check`
 - Run `cd crates/taxvault-wasm && wasm-pack build --target web --out-dir ../../web/pkg --release`
-- Run `npx playwright install chromium`
-- Run `npm run test:web-smoke`
+- Run `npx playwright install chromium firefox webkit`
+- Run `PLAYWRIGHT_ALL_BROWSERS=1 npm run test:web-smoke`
 
 ## Release Approval
 

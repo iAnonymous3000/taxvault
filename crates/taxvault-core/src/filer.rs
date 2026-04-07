@@ -87,6 +87,8 @@ pub struct IncomeAdjustments {
     pub traditional_ira_deduction: Decimal,
     pub hsa_deduction: Decimal,
     pub student_loan_interest_paid: Decimal,
+    pub student_loan_interest_is_qualified_loan: bool,
+    pub student_loan_interest_is_legally_obligated: bool,
 }
 
 impl Default for IncomeAdjustments {
@@ -95,6 +97,8 @@ impl Default for IncomeAdjustments {
             traditional_ira_deduction: Decimal::ZERO,
             hsa_deduction: Decimal::ZERO,
             student_loan_interest_paid: Decimal::ZERO,
+            student_loan_interest_is_qualified_loan: false,
+            student_loan_interest_is_legally_obligated: false,
         }
     }
 }

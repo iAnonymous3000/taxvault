@@ -32,7 +32,9 @@
       }
     ],
     "adjustments": {
-      "student_loan_interest_paid": 2500
+      "student_loan_interest_paid": 2500,
+      "student_loan_interest_is_qualified_loan": true,
+      "student_loan_interest_is_legally_obligated": true
     }
   },
   "expected": {

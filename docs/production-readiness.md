@@ -8,7 +8,7 @@ Reason:
 
 - Tax Vault is intentionally scoped as a narrow 2025 federal estimate tool.
 - The embedded 2025 tax table is currently marked `machine_checked`, not `human_verified`.
-- Head of Household and student loan interest eligibility checks still require manual review.
+- The release checklist still needs completed approver, date, and deployed-commit sign-off before any public estimate release.
 
 ## Estimate-Only Release Gate
 

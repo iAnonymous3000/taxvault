@@ -1,5 +1,34 @@
 const { defineConfig, devices } = require("@playwright/test");
 
+const runCrossBrowser =
+  process.env.CI === "true" || process.env.CI === "1" || process.env.PLAYWRIGHT_ALL_BROWSERS === "1";
+
+const projects = [
+  {
+    name: "chromium",
+    use: {
+      ...devices["Desktop Chrome"],
+    },
+  },
+];
+
+if (runCrossBrowser) {
+  projects.push(
+    {
+      name: "firefox",
+      use: {
+        ...devices["Desktop Firefox"],
+      },
+    },
+    {
+      name: "webkit",
+      use: {
+        ...devices["Desktop Safari"],
+      },
+    }
+  );
+}
+
 module.exports = defineConfig({
   testDir: "./tests/playwright",
   timeout: 30_000,
@@ -21,12 +50,5 @@ module.exports = defineConfig({
     reuseExistingServer: !process.env.CI,
     timeout: 30_000,
   },
-  projects: [
-    {
-      name: "chromium",
-      use: {
-        ...devices["Desktop Chrome"],
-      },
-    },
-  ],
+  projects,
 });

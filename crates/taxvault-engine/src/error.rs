@@ -22,6 +22,9 @@ pub enum PolicyError {
     #[error("Head of Household scenario not supported for automated estimates: {reason}")]
     HeadOfHouseholdNotSupported { reason: String },
 
+    #[error("Student loan interest deduction not supported for automated estimates: {reason}")]
+    StudentLoanInterestNotSupported { reason: String },
+
     #[error("Traditional IRA deduction estimates are not supported: TaxVault does not collect employer-plan coverage, spousal coverage, or annual contribution-limit details")]
     TraditionalIraDeductionNotSupported,
 

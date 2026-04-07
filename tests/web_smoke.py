@@ -543,7 +543,25 @@ class WebSmokeTests(unittest.TestCase):
         )
         self.assertTrue(self.browser.is_disabled("#computeBtn"))
 
-    def test_head_of_household_parent_case_is_blocked_before_compute(self):
+    def test_dependent_filer_is_blocked_before_the_income_step(self):
+        self.open_app()
+        self.browser.set_value("#pFirst", "Alex")
+        self.browser.set_value("#pLast", "Filer")
+        self.browser.set_value("#pSsn", "400-01-0001")
+        self.browser.set_value("#pDob", "1990-06-15")
+        self.browser.set_checked("#pDependent", True)
+        self.browser.click("#step1ContinueBtn")
+
+        self.browser.wait_for(
+            lambda: self.browser.class_list_contains("#step1", "active"),
+            "step 1 should remain active for dependent filers",
+        )
+        self.assertIn(
+            "TaxVault does not support filers who can be claimed as dependents on another return.",
+            self.browser.text("#error"),
+        )
+
+    def test_head_of_household_parent_case_is_blocked_before_the_income_step(self):
         self.open_app()
         self.browser.click('.status-option[data-status="head_of_household"]')
         self.browser.set_value("#pFirst", "Alex")
@@ -558,20 +576,13 @@ class WebSmokeTests(unittest.TestCase):
         self.browser.set_value("#dep-1-months", "12")
         self.browser.click("#step1ContinueBtn")
         self.browser.wait_for(
-            lambda: self.browser.class_list_contains("#step2", "active"),
-            "step 2 never became active for Head of Household flow",
+            lambda: self.browser.class_list_contains("#step1", "active"),
+            "step 1 should remain active for unsupported Head of Household flow",
         )
-        self.add_supported_w2()
-
-        self.browser.wait_for(
-            lambda: self.browser.text("#supportReviewBadge") == "Unsupported",
-            "support review never marked the parent-based Head of Household draft unsupported",
+        self.assertIn(
+            "Head of Household with only a dependent parent is outside TaxVault's supported estimate slice.",
+            self.browser.text("#error"),
         )
-        issues = self.browser.texts("#supportReviewIssues li")
-        self.assertTrue(
-            any("dependent parent" in item for item in issues)
-        )
-        self.assertTrue(self.browser.is_disabled("#computeBtn"))
 
     def test_traditional_ira_deduction_is_blocked_before_compute(self):
         self.open_app()
@@ -800,6 +811,7 @@ class WebSmokeTests(unittest.TestCase):
                 "ssn": "400-01-0001",
                 "dob": "1990-06-15",
                 "isBlind": False,
+                "isDependent": False,
             },
             "spouse": {
                 "firstName": "",
@@ -807,11 +819,14 @@ class WebSmokeTests(unittest.TestCase):
                 "ssn": "",
                 "dob": "",
                 "isBlind": False,
+                "isDependent": False,
             },
             "adjustments": {
                 "traditionalIraDeduction": "",
                 "hsaDeduction": "",
                 "studentLoanInterestPaid": "",
+                "studentLoanQualifiedLoan": False,
+                "studentLoanLegallyObligated": False,
             },
             "dependents": [],
             "w2s": [

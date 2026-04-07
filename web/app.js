@@ -27,6 +27,7 @@ const AUDIT_TRAIL_FILE_TYPE = "taxvault-audit-trail";
 const SUPPORT_SNAPSHOT_VERSION = 1;
 const SUPPORT_SNAPSHOT_FILE_TYPE = "taxvault-support-snapshot";
 const TESTING_HOOKS_QUERY_PARAM = "taxvaultTesting";
+const TAXVAULT_STORAGE_KEY_PREFIX = "taxvault:";
 const ACTIVE_TAX_YEAR_STORAGE_KEY = "taxvault:active-tax-year";
 const MAX_W2_FORMS = 25;
 const MAX_INTEREST_FORMS = 25;
@@ -63,6 +64,19 @@ const ALLOWED_INCOME_RECIPIENTS = new Set(["primary", "spouse"]);
 const ALLOWED_DEPENDENT_RELATIONSHIPS = new Set(
   DEPENDENT_RELATIONSHIP_OPTIONS.map((opt) => opt.value).filter(Boolean)
 );
+const SUPPORTED_HOH_QUALIFYING_RELATIONSHIPS = new Set([
+  "son",
+  "daughter",
+  "stepchild",
+  "foster_child",
+  "sibling",
+  "step_sibling",
+  "half_sibling",
+  "grandchild",
+  "niece",
+  "nephew",
+  "grandparent",
+]);
 const ISO_DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 const DRAFT_1040_SECTIONS = [
   {
@@ -151,6 +165,8 @@ const els = {
   taxYearSelect: document.getElementById("taxYearSelect"),
   taxYearHint: document.getElementById("taxYearHint"),
   spouseCard: document.getElementById("spouseCard"),
+  pDependent: document.getElementById("pDependent"),
+  sDependent: document.getElementById("sDependent"),
   dependentSection: document.getElementById("dependentSection"),
   dependentSubtitle: document.getElementById("dependentSubtitle"),
   dependentContainer: document.getElementById("dependentContainer"),
@@ -177,6 +193,8 @@ const els = {
   traditionalIraDeduction: document.getElementById("traditionalIraDeduction"),
   hsaDeduction: document.getElementById("hsaDeduction"),
   studentLoanInterestPaid: document.getElementById("studentLoanInterestPaid"),
+  studentLoanQualifiedLoan: document.getElementById("studentLoanQualifiedLoan"),
+  studentLoanLegallyObligated: document.getElementById("studentLoanLegallyObligated"),
   estimatedTaxPayments: document.getElementById("estimatedTaxPayments"),
   computeBtn: document.getElementById("computeBtn"),
   computeHelp: document.getElementById("computeHelp"),
@@ -256,6 +274,7 @@ function bindStaticEvents() {
   els.traceToggle.addEventListener("click", toggleTrace);
   els.app.addEventListener("input", handleAppFieldMutation);
   els.app.addEventListener("change", handleAppFieldMutation);
+  els.app.addEventListener("focusout", handleAppFieldBlur);
   document.addEventListener("keydown", handleDocumentKeydown);
 
   bindSsnFields(document);
@@ -682,6 +701,33 @@ function removeStoredValue(storage, key) {
   }
 }
 
+function removeStoredValuesByPrefix(storage, prefix) {
+  if (!storage) {
+    return;
+  }
+
+  const keysToRemove = [];
+  try {
+    for (let index = 0; index < storage.length; index += 1) {
+      const key = storage.key(index);
+      if (typeof key === "string" && key.startsWith(prefix)) {
+        keysToRemove.push(key);
+      }
+    }
+  } catch {
+    return;
+  }
+
+  keysToRemove.forEach((key) => {
+    removeStoredValue(storage, key);
+  });
+}
+
+function clearAllStoredTaxVaultData() {
+  removeStoredValuesByPrefix(storageFor("session"), TAXVAULT_STORAGE_KEY_PREFIX);
+  removeStoredValuesByPrefix(storageFor("local"), TAXVAULT_STORAGE_KEY_PREFIX);
+}
+
 function rememberDraftEnabled() {
   return Boolean(els.rememberDraftToggle?.checked);
 }
@@ -979,6 +1025,8 @@ function captureDraftSnapshot() {
       traditionalIraDeduction: readTrimmedControlValue(els.traditionalIraDeduction),
       hsaDeduction: readTrimmedControlValue(els.hsaDeduction),
       studentLoanInterestPaid: readTrimmedControlValue(els.studentLoanInterestPaid),
+      studentLoanQualifiedLoan: Boolean(els.studentLoanQualifiedLoan?.checked),
+      studentLoanLegallyObligated: Boolean(els.studentLoanLegallyObligated?.checked),
     },
     estimatedTaxPayments: readTrimmedControlValue(els.estimatedTaxPayments),
     dependents: Array.from(els.dependentContainer.querySelectorAll(".dependent-card")).map((card) => ({
@@ -1090,7 +1138,8 @@ function redactSupportPerson(filer, { label, taxYear } = {}) {
     lastName.trim() !== "" ||
     ssn.trim() !== "" ||
     (typeof filer?.dob === "string" && filer.dob.trim() !== "") ||
-    Boolean(filer?.isBlind);
+    Boolean(filer?.isBlind) ||
+    Boolean(filer?.isDependent);
 
   return {
     label: label || "Person",
@@ -1101,6 +1150,7 @@ function redactSupportPerson(filer, { label, taxYear } = {}) {
     dob: "",
     ageOnTaxYearEnd: ageOnTaxYearEnd(filer?.dob, taxYear),
     isBlind: Boolean(filer?.isBlind),
+    isDependent: Boolean(filer?.isDependent),
   };
 }
 
@@ -1129,6 +1179,8 @@ function buildAnonymizedSupportInputSnapshot(snapshot, taxYear) {
       traditionalIraDeduction: snapshot.adjustments?.traditionalIraDeduction || "",
       hsaDeduction: snapshot.adjustments?.hsaDeduction || "",
       studentLoanInterestPaid: snapshot.adjustments?.studentLoanInterestPaid || "",
+      studentLoanQualifiedLoan: Boolean(snapshot.adjustments?.studentLoanQualifiedLoan),
+      studentLoanLegallyObligated: Boolean(snapshot.adjustments?.studentLoanLegallyObligated),
     },
     estimatedTaxPayments: snapshot.estimatedTaxPayments || "",
     dependents: Array.isArray(snapshot.dependents)
@@ -1445,6 +1497,7 @@ function sanitizeDraftSnapshotForRestore(snapshot) {
               ? rawPrimary.dob
               : "",
           isBlind: Boolean(rawPrimary.isBlind),
+          isDependent: Boolean(rawPrimary.isDependent),
         }
       : {
           firstName: "",
@@ -1452,6 +1505,7 @@ function sanitizeDraftSnapshotForRestore(snapshot) {
           ssn: "",
           dob: "",
           isBlind: false,
+          isDependent: false,
         };
 
   const spouse =
@@ -1463,6 +1517,7 @@ function sanitizeDraftSnapshotForRestore(snapshot) {
           dob:
             typeof rawSpouse.dob === "string" && ISO_DATE_RE.test(rawSpouse.dob) ? rawSpouse.dob : "",
           isBlind: Boolean(rawSpouse.isBlind),
+          isDependent: Boolean(rawSpouse.isDependent),
         }
       : {
           firstName: "",
@@ -1470,6 +1525,7 @@ function sanitizeDraftSnapshotForRestore(snapshot) {
           ssn: "",
           dob: "",
           isBlind: false,
+          isDependent: false,
         };
 
   const rawAdj = snapshot.adjustments;
@@ -1479,11 +1535,15 @@ function sanitizeDraftSnapshotForRestore(snapshot) {
           traditionalIraDeduction: truncateDraftField(rawAdj.traditionalIraDeduction, 32),
           hsaDeduction: truncateDraftField(rawAdj.hsaDeduction, 32),
           studentLoanInterestPaid: truncateDraftField(rawAdj.studentLoanInterestPaid, 32),
+          studentLoanQualifiedLoan: Boolean(rawAdj.studentLoanQualifiedLoan),
+          studentLoanLegallyObligated: Boolean(rawAdj.studentLoanLegallyObligated),
         }
       : {
           traditionalIraDeduction: "",
           hsaDeduction: "",
           studentLoanInterestPaid: "",
+          studentLoanQualifiedLoan: false,
+          studentLoanLegallyObligated: false,
         };
   const estimatedTaxPayments = truncateDraftField(snapshot.estimatedTaxPayments, 32);
 
@@ -1788,14 +1848,13 @@ function applyDraftSnapshot(snapshot) {
     );
     restoreInterestCards(Array.isArray(snapshot.interestIncome) ? snapshot.interestIncome : []);
     restoreDividendCards(Array.isArray(snapshot.dividendIncome) ? snapshot.dividendIncome : []);
+    const step1Validation = validateStep1();
+    const nextStep = snapshot.currentStep === 2 && step1Validation.messages.length === 0 ? 2 : 1;
+    goToStep(nextStep);
+    hideError();
   } finally {
     draftRestoreInProgress = false;
   }
-
-  const step1Validation = validateStep1();
-  const nextStep = snapshot.currentStep === 2 && step1Validation.messages.length === 0 ? 2 : 1;
-  goToStep(nextStep);
-  hideError();
 }
 
 function clearRestorableCards() {
@@ -1830,12 +1889,22 @@ function applyFilerInputs(prefix, filer = {}) {
   document.getElementById(`${prefix}Ssn`).value = filer.ssn || "";
   document.getElementById(`${prefix}Dob`).value = filer.dob || "";
   document.getElementById(`${prefix}Blind`).checked = Boolean(filer.isBlind);
+  const dependentCheckbox = document.getElementById(`${prefix}Dependent`);
+  if (dependentCheckbox) {
+    dependentCheckbox.checked = Boolean(filer.isDependent);
+  }
 }
 
 function applyAdjustmentInputs(adjustments = {}, estimatedTaxPayments = "") {
   els.traditionalIraDeduction.value = adjustments.traditionalIraDeduction || "";
   els.hsaDeduction.value = adjustments.hsaDeduction || "";
   els.studentLoanInterestPaid.value = adjustments.studentLoanInterestPaid || "";
+  if (els.studentLoanQualifiedLoan) {
+    els.studentLoanQualifiedLoan.checked = Boolean(adjustments.studentLoanQualifiedLoan);
+  }
+  if (els.studentLoanLegallyObligated) {
+    els.studentLoanLegallyObligated.checked = Boolean(adjustments.studentLoanLegallyObligated);
+  }
   els.estimatedTaxPayments.value = estimatedTaxPayments || "";
   bindMoneyFields(document);
 }
@@ -2089,7 +2158,7 @@ function selectStatus(status, { autoSeedDependent = true, focusSelected = false 
 
 function updateDependentSubtitle(isHoh) {
   els.dependentSubtitle.textContent = isHoh
-    ? "Head of Household requires at least one dependent. TaxVault only supports resident qualifying-person cases it can screen from these inputs, so parent-based and 'other' dependent scenarios are blocked. Child-related credits only apply to qualifying children under age 17, and TaxVault does not verify every IRS dependency or custody rule."
+    ? "Head of Household requires at least one dependent. TaxVault only supports resident qualifying-person cases it can screen from these inputs, so parent-based and 'other' dependent scenarios are blocked before income entry. Child-related credits only apply to qualifying children under age 17, and TaxVault does not verify every IRS dependency or custody rule."
     : "Add any dependents you plan to claim. Dependents entered here may affect the Child Tax Credit or Credit for Other Dependents, but TaxVault does not verify every IRS dependency or custody rule.";
 }
 
@@ -2214,7 +2283,19 @@ function validateStep1() {
   });
   validateUniqueSsnEntries(messages, primary, spouse, dependents);
 
-  return { messages, fieldErrors };
+  if (messages.length === 0) {
+    if (primary.isDependent || spouse?.isDependent) {
+      messages.push(
+        "TaxVault does not support filers who can be claimed as dependents on another return."
+      );
+    }
+
+    if (state.filingStatus === "head_of_household") {
+      messages.push(...collectHeadOfHouseholdStep1Issues(dependents));
+    }
+  }
+
+  return { messages: dedupeMessages(messages), fieldErrors };
 }
 
 function readFilerInputs(prefix) {
@@ -2224,7 +2305,46 @@ function readFilerInputs(prefix) {
     ssn: readTrimmedControlValue(document.getElementById(`${prefix}Ssn`)),
     dob: readControlValue(document.getElementById(`${prefix}Dob`)),
     isBlind: Boolean(document.getElementById(`${prefix}Blind`)?.checked),
+    isDependent: Boolean(document.getElementById(`${prefix}Dependent`)?.checked),
   };
+}
+
+function isSupportedHohQualifyingPersonCandidate(dependent) {
+  const monthsLivedInHome = Number(
+    dependent?.months_lived_in_home ?? dependent?.monthsLivedInHome ?? Number.NaN
+  );
+
+  return (
+    Number.isFinite(monthsLivedInHome) &&
+    monthsLivedInHome > 6 &&
+    SUPPORTED_HOH_QUALIFYING_RELATIONSHIPS.has(dependent?.relationship)
+  );
+}
+
+function collectHeadOfHouseholdStep1Issues(dependents) {
+  if (!Array.isArray(dependents) || dependents.length === 0) {
+    return [];
+  }
+
+  if (dependents.some(isSupportedHohQualifyingPersonCandidate)) {
+    return [];
+  }
+
+  if (dependents.some((dependent) => dependent.relationship === "parent")) {
+    return [
+      "Head of Household with only a dependent parent is outside TaxVault's supported estimate slice. TaxVault does not collect the parent-home support facts needed to screen it.",
+    ];
+  }
+
+  if (dependents.some((dependent) => dependent.relationship === "other")) {
+    return [
+      "Head of Household with only an 'other' dependent is outside TaxVault's supported estimate slice because TaxVault cannot determine a qualifying person from that relationship alone.",
+    ];
+  }
+
+  return [
+    "Head of Household requires a dependent TaxVault can screen who lived with you more than half the year.",
+  ];
 }
 
 function showError(messages, fieldErrors = []) {
@@ -2279,6 +2399,380 @@ function clearFieldErrors() {
     el.removeAttribute("aria-invalid");
     el.removeAttribute("aria-describedby");
   });
+}
+
+function fieldErrorId(control) {
+  return control instanceof HTMLElement && control.id ? `${control.id}-error` : "";
+}
+
+function clearInlineErrorForControl(control) {
+  if (!(control instanceof HTMLElement)) {
+    return;
+  }
+
+  const errorId = fieldErrorId(control);
+  if (!errorId) {
+    return;
+  }
+
+  const error = document.getElementById(errorId);
+  if (error?.classList.contains("field-error-inline")) {
+    error.remove();
+  }
+
+  if (control.getAttribute("aria-describedby") === errorId) {
+    control.removeAttribute("aria-describedby");
+  }
+
+  control.removeAttribute("aria-invalid");
+}
+
+function setInlineErrorForControl(control, message) {
+  if (!(control instanceof HTMLElement)) {
+    return;
+  }
+
+  clearInlineErrorForControl(control);
+
+  if (!message) {
+    return;
+  }
+
+  const field = control.closest(".field");
+  const errorId = fieldErrorId(control);
+  if (!field || !errorId) {
+    return;
+  }
+
+  const hint = document.createElement("span");
+  hint.className = "field-error-inline";
+  hint.textContent = message;
+  hint.id = errorId;
+  field.appendChild(hint);
+  control.setAttribute("aria-invalid", "true");
+  control.setAttribute("aria-describedby", errorId);
+}
+
+function isBlankCard(card, selectors) {
+  return selectors.every((selector) => readTrimmedQueryValue(card, selector) === "");
+}
+
+function isBlankW2Card(card) {
+  return isBlankCard(card, [
+    ".w2-employer",
+    ".w2-ein",
+    ".w2-wages",
+    ".w2-fed-wh",
+    ".w2-state-wh",
+    ".w2-ss-wages",
+    ".w2-ss-wh",
+    ".w2-med-wages",
+    ".w2-med-wh",
+  ]);
+}
+
+function isBlankDependentCard(card) {
+  return isBlankCard(card, [
+    ".dep-first",
+    ".dep-last",
+    ".dep-ssn",
+    ".dep-dob",
+    ".dep-relationship",
+    ".dep-months",
+  ]);
+}
+
+function isBlankInterestCard(card) {
+  return isBlankCard(card, [".interest-payer", ".interest-taxable", ".interest-tax-exempt"]);
+}
+
+function isBlankSocialSecurityCard(card) {
+  return isBlankCard(card, [".ssa-benefits", ".ssa-withholding"]);
+}
+
+function isBlankDividendCard(card) {
+  return isBlankCard(card, [".dividend-payer", ".dividend-ordinary", ".dividend-qualified"]);
+}
+
+function validateRequiredTextValue(value) {
+  return value ? "" : "Required";
+}
+
+function validateSsnValue(value) {
+  if (!value) {
+    return "Required";
+  }
+
+  return SSN_PATTERN.test(value) ? "" : "Format: 123-45-6789";
+}
+
+function validateDateValue(value) {
+  if (!value) {
+    return "Required";
+  }
+
+  return isPastOrToday(value) ? "" : "Must be a past date";
+}
+
+function validateNonNegativeMoneyValue(rawValue) {
+  const value = parseMoney(rawValue, 0);
+  return Number.isFinite(value) && value >= 0 ? "" : "Must be 0 or greater";
+}
+
+function validatePositiveMoneyValue(rawValue) {
+  const value = parseMoney(rawValue);
+  return Number.isFinite(value) && value > 0 ? "" : "Must be greater than 0";
+}
+
+function getInlineFieldValidationMessage(control) {
+  if (
+    !(control instanceof HTMLInputElement || control instanceof HTMLSelectElement || control instanceof HTMLTextAreaElement)
+    || control.disabled
+    || control.type === "hidden"
+    || control.type === "file"
+  ) {
+    return "";
+  }
+
+  const value = readTrimmedControlValue(control);
+  const id = control.id;
+
+  switch (id) {
+    case "pFirst":
+    case "pLast":
+      return validateRequiredTextValue(value);
+    case "pSsn":
+      return validateSsnValue(value);
+    case "pDob":
+      return validateDateValue(readControlValue(control));
+    case "sFirst":
+    case "sLast":
+      return state.filingStatus === "married_filing_jointly" ? validateRequiredTextValue(value) : "";
+    case "sSsn":
+      return state.filingStatus === "married_filing_jointly" ? validateSsnValue(value) : "";
+    case "sDob":
+      return state.filingStatus === "married_filing_jointly" ? validateDateValue(readControlValue(control)) : "";
+    case "traditionalIraDeduction":
+    case "hsaDeduction":
+    case "studentLoanInterestPaid":
+    case "estimatedTaxPayments":
+      return validateNonNegativeMoneyValue(value);
+    default:
+      break;
+  }
+
+  const card = control.closest(".w2-card, .ssa-card, .interest-card, .dividend-card, .dependent-card");
+  const isActualW2Card = Boolean(
+    card?.classList.contains("w2-card")
+    && !card.classList.contains("ssa-card")
+    && !card.classList.contains("interest-card")
+    && !card.classList.contains("dividend-card")
+  );
+
+  if (card?.classList.contains("dependent-card")) {
+    if (isBlankDependentCard(card)) {
+      return "";
+    }
+
+    if (control.classList.contains("dep-first") || control.classList.contains("dep-last")) {
+      return validateRequiredTextValue(value);
+    }
+
+    if (control.classList.contains("dep-ssn")) {
+      return validateSsnValue(value);
+    }
+
+    if (control.classList.contains("dep-dob")) {
+      return validateDateValue(readControlValue(control));
+    }
+
+    if (control.classList.contains("dep-relationship")) {
+      return value ? "" : "Required";
+    }
+
+    if (control.classList.contains("dep-months")) {
+      const months = value === "" ? Number.NaN : Number(value);
+      return Number.isInteger(months) && months >= 0 && months <= 12
+        ? ""
+        : "Enter 0-12";
+    }
+  }
+
+  if (isActualW2Card) {
+    if (isBlankW2Card(card)) {
+      return "";
+    }
+
+    if (control.classList.contains("w2-employer")) {
+      return validateRequiredTextValue(value);
+    }
+
+    if (control.classList.contains("w2-ein")) {
+      if (!value) {
+        return "Required";
+      }
+      return EIN_PATTERN.test(value) ? "" : "Format: 12-3456789";
+    }
+
+    if (control.classList.contains("w2-wages")) {
+      return validatePositiveMoneyValue(value);
+    }
+
+    if (
+      control.classList.contains("w2-fed-wh")
+      || control.classList.contains("w2-state-wh")
+      || control.classList.contains("w2-ss-wh")
+      || control.classList.contains("w2-med-wh")
+    ) {
+      const baseError = validateNonNegativeMoneyValue(value);
+      if (baseError) {
+        return baseError;
+      }
+    }
+
+    if (control.classList.contains("w2-ss-wages") || control.classList.contains("w2-med-wages")) {
+      if (value === "") {
+        return "";
+      }
+      const baseError = validateNonNegativeMoneyValue(value);
+      if (baseError) {
+        return baseError;
+      }
+    }
+
+    const wages = parseMoney(readTrimmedQueryValue(card, ".w2-wages"));
+    const federalTaxWithheld = parseMoney(readTrimmedQueryValue(card, ".w2-fed-wh"), 0);
+    const socialSecurityWagesRaw = readTrimmedQueryValue(card, ".w2-ss-wages");
+    const socialSecurityWages =
+      socialSecurityWagesRaw === "" ? wages : parseMoney(socialSecurityWagesRaw);
+    const socialSecurityTaxWithheld = parseMoney(readTrimmedQueryValue(card, ".w2-ss-wh"), 0);
+    const medicareWagesRaw = readTrimmedQueryValue(card, ".w2-med-wages");
+    const medicareWages = medicareWagesRaw === "" ? wages : parseMoney(medicareWagesRaw);
+    const medicareTaxWithheld = parseMoney(readTrimmedQueryValue(card, ".w2-med-wh"), 0);
+
+    if (
+      control.classList.contains("w2-fed-wh")
+      && Number.isFinite(wages)
+      && Number.isFinite(federalTaxWithheld)
+      && federalTaxWithheld > wages
+    ) {
+      return "Cannot exceed wages";
+    }
+
+    if (
+      (control.classList.contains("w2-ss-wages") || control.classList.contains("w2-ss-wh"))
+      && Number.isFinite(socialSecurityWages)
+      && Number.isFinite(socialSecurityTaxWithheld)
+      && socialSecurityTaxWithheld > socialSecurityWages
+    ) {
+      return "Withholding cannot exceed SS wages";
+    }
+
+    if (
+      (control.classList.contains("w2-med-wages") || control.classList.contains("w2-med-wh"))
+      && Number.isFinite(medicareWages)
+      && Number.isFinite(medicareTaxWithheld)
+      && medicareTaxWithheld > medicareWages
+    ) {
+      return "Withholding cannot exceed Medicare wages";
+    }
+  }
+
+  if (card?.classList.contains("interest-card")) {
+    if (isBlankInterestCard(card)) {
+      return "";
+    }
+
+    if (control.classList.contains("interest-taxable") || control.classList.contains("interest-tax-exempt")) {
+      const baseError = validateNonNegativeMoneyValue(value);
+      if (baseError) {
+        return baseError;
+      }
+
+      const taxableInterest = parseMoney(readTrimmedQueryValue(card, ".interest-taxable"), 0);
+      const taxExemptInterest = parseMoney(readTrimmedQueryValue(card, ".interest-tax-exempt"), 0);
+      if (Number.isFinite(taxableInterest) && Number.isFinite(taxExemptInterest) && taxableInterest === 0 && taxExemptInterest === 0) {
+        return "Enter taxable or tax-exempt interest";
+      }
+    }
+  }
+
+  if (card?.classList.contains("ssa-card")) {
+    if (isBlankSocialSecurityCard(card)) {
+      return "";
+    }
+
+    if (control.classList.contains("ssa-benefits")) {
+      const baseError = validatePositiveMoneyValue(value);
+      if (baseError) {
+        return baseError;
+      }
+    }
+
+    if (control.classList.contains("ssa-withholding")) {
+      const baseError = validateNonNegativeMoneyValue(value);
+      if (baseError) {
+        return baseError;
+      }
+    }
+
+    const totalBenefits = parseMoney(readTrimmedQueryValue(card, ".ssa-benefits"));
+    const voluntaryWithholding = parseMoney(readTrimmedQueryValue(card, ".ssa-withholding"), 0);
+    if (
+      control.classList.contains("ssa-withholding")
+      && Number.isFinite(totalBenefits)
+      && Number.isFinite(voluntaryWithholding)
+      && voluntaryWithholding > totalBenefits
+    ) {
+      return "Cannot exceed total benefits";
+    }
+  }
+
+  if (card?.classList.contains("dividend-card")) {
+    if (isBlankDividendCard(card)) {
+      return "";
+    }
+
+    if (control.classList.contains("dividend-ordinary") || control.classList.contains("dividend-qualified")) {
+      const baseError = validateNonNegativeMoneyValue(value);
+      if (baseError) {
+        return baseError;
+      }
+
+      const ordinaryDividends = parseMoney(readTrimmedQueryValue(card, ".dividend-ordinary"), 0);
+      const qualifiedDividends = parseMoney(readTrimmedQueryValue(card, ".dividend-qualified"), 0);
+
+      if (
+        Number.isFinite(ordinaryDividends)
+        && Number.isFinite(qualifiedDividends)
+        && ordinaryDividends === 0
+        && qualifiedDividends === 0
+      ) {
+        return "Enter ordinary or qualified dividends";
+      }
+
+      if (
+        control.classList.contains("dividend-qualified")
+        && Number.isFinite(ordinaryDividends)
+        && Number.isFinite(qualifiedDividends)
+        && qualifiedDividends > ordinaryDividends
+      ) {
+        return "Cannot exceed ordinary dividends";
+      }
+    }
+  }
+
+  return "";
+}
+
+function handleAppFieldBlur(event) {
+  const target = event.target;
+  if (!(target instanceof HTMLElement) || !els.app.contains(target)) {
+    return;
+  }
+
+  const message = getInlineFieldValidationMessage(target);
+  setInlineErrorForControl(target, message);
 }
 
 function renderLoadingError(message) {
@@ -3136,6 +3630,8 @@ function handleAppFieldMutation(event) {
     return;
   }
 
+  clearInlineErrorForControl(event.target);
+
   if (event.target.closest("#step1, #step2")) {
     resetComputedEstimate();
   }
@@ -3457,6 +3953,10 @@ function collectAdjustments(errors) {
     traditional_ira_deduction: 0,
     hsa_deduction: 0,
     student_loan_interest_paid: 0,
+    student_loan_interest_is_qualified_loan: Boolean(els.studentLoanQualifiedLoan?.checked),
+    student_loan_interest_is_legally_obligated: Boolean(
+      els.studentLoanLegallyObligated?.checked
+    ),
   };
 
   const fields = [
@@ -3487,6 +3987,20 @@ function collectAdjustments(errors) {
     adjustments[key] = value;
   });
 
+  if (adjustments.student_loan_interest_paid > 0) {
+    if (!adjustments.student_loan_interest_is_qualified_loan) {
+      errors.push(
+        "Confirm the student loan interest was paid on a qualified student loan before calculating."
+      );
+    }
+
+    if (!adjustments.student_loan_interest_is_legally_obligated) {
+      errors.push(
+        "Confirm you were legally obligated to pay that student loan before calculating."
+      );
+    }
+  }
+
   return adjustments;
 }
 
@@ -3507,7 +4021,7 @@ function filerPayload(filer) {
     ssn: filer.ssn,
     date_of_birth: filer.dob,
     is_blind: filer.isBlind,
-    is_dependent: false,
+    is_dependent: filer.isDependent,
   };
 }
 
@@ -4428,21 +4942,44 @@ function reviewPacketExportFilename(envelope) {
 }
 
 function downloadFile(contents, fileName, mimeType) {
-  const blob = new Blob([contents], { type: mimeType });
-  const blobUrl = URL.createObjectURL(blob);
+  let blobUrl = "";
   const link = document.createElement("a");
-  link.href = blobUrl;
-  link.download = fileName;
-  document.body.append(link);
-  link.click();
-  link.remove();
-  window.setTimeout(() => {
-    URL.revokeObjectURL(blobUrl);
-  }, DOWNLOAD_BLOB_URL_REVOKE_DELAY_MS);
+
+  try {
+    const blob = new Blob([contents], { type: mimeType });
+    blobUrl = URL.createObjectURL(blob);
+    link.href = blobUrl;
+    link.download = fileName;
+    link.rel = "noopener";
+    document.body.append(link);
+    link.click();
+  } finally {
+    link.remove();
+    if (blobUrl) {
+      window.setTimeout(() => {
+        URL.revokeObjectURL(blobUrl);
+      }, DOWNLOAD_BLOB_URL_REVOKE_DELAY_MS);
+    }
+  }
 }
 
 function downloadJsonFile(contents, fileName) {
   downloadFile(contents, fileName, "application/json");
+}
+
+function tryDownloadFile(contents, fileName, mimeType, label) {
+  try {
+    downloadFile(contents, fileName, mimeType);
+    return true;
+  } catch (error) {
+    showError(`Could not start the ${label} download. ${safeMessage(error)}`);
+    announceUiStatus(`${label} download failed.`);
+    return false;
+  }
+}
+
+function tryDownloadJsonFile(contents, fileName, label) {
+  return tryDownloadFile(contents, fileName, "application/json", label);
 }
 
 function exportDraftToFile() {
@@ -4454,7 +4991,15 @@ function exportDraftToFile() {
   }
 
   storeDraftEnvelope(envelope, { refreshStatus: false });
-  downloadJsonFile(JSON.stringify(envelope, null, 2), draftExportFilename(envelope));
+  if (
+    !tryDownloadJsonFile(
+      JSON.stringify(envelope, null, 2),
+      draftExportFilename(envelope),
+      "draft export"
+    )
+  ) {
+    return;
+  }
   refreshStorageStatus("Draft exported. SSNs and EINs are never included in TaxVault draft files.");
   announceUiStatus("Draft exported.");
 }
@@ -5044,7 +5589,15 @@ function exportAuditTrailToFile() {
     return;
   }
 
-  downloadJsonFile(JSON.stringify(envelope, null, 2), auditTrailExportFilename(envelope));
+  if (
+    !tryDownloadJsonFile(
+      JSON.stringify(envelope, null, 2),
+      auditTrailExportFilename(envelope),
+      "audit trail export"
+    )
+  ) {
+    return;
+  }
   announceUiStatus("Audit trail exported.");
 }
 
@@ -5056,7 +5609,15 @@ function exportSupportSnapshotToFile() {
     return;
   }
 
-  downloadJsonFile(JSON.stringify(envelope, null, 2), supportSnapshotExportFilename(envelope));
+  if (
+    !tryDownloadJsonFile(
+      JSON.stringify(envelope, null, 2),
+      supportSnapshotExportFilename(envelope),
+      "support snapshot export"
+    )
+  ) {
+    return;
+  }
   announceUiStatus("Support snapshot exported.");
 }
 
@@ -5069,7 +5630,16 @@ function exportReviewPacketToFile() {
   }
 
   const html = buildReviewPacketHtml(envelope);
-  downloadFile(html, reviewPacketExportFilename(envelope), "text/html");
+  if (
+    !tryDownloadFile(
+      html,
+      reviewPacketExportFilename(envelope),
+      "text/html",
+      "review packet export"
+    )
+  ) {
+    return;
+  }
   announceUiStatus("Review packet exported.");
 }
 
@@ -5159,15 +5729,27 @@ function clearAllData() {
   document.getElementById("pSsn").value = "";
   document.getElementById("pDob").value = "";
   document.getElementById("pBlind").checked = false;
+  if (els.pDependent) {
+    els.pDependent.checked = false;
+  }
 
   document.getElementById("sFirst").value = "";
   document.getElementById("sLast").value = "";
   document.getElementById("sSsn").value = "";
   document.getElementById("sDob").value = "";
   document.getElementById("sBlind").checked = false;
+  if (els.sDependent) {
+    els.sDependent.checked = false;
+  }
   els.traditionalIraDeduction.value = "";
   els.hsaDeduction.value = "";
   els.studentLoanInterestPaid.value = "";
+  if (els.studentLoanQualifiedLoan) {
+    els.studentLoanQualifiedLoan.checked = false;
+  }
+  if (els.studentLoanLegallyObligated) {
+    els.studentLoanLegallyObligated.checked = false;
+  }
   els.estimatedTaxPayments.value = "";
 
   els.w2Container.replaceChildren();
@@ -5199,9 +5781,7 @@ function clearAllData() {
   els.gateAcknowledge.checked = false;
   updateGateButtonState();
   els.app.classList.add("hidden");
-  removeStoredValue(storageFor("session"), draftSessionStorageKey());
-  removeStoredValue(storageFor("local"), draftLocalStorageKey());
-  removeStoredValue(storageFor("local"), draftPreferenceStorageKey());
+  clearAllStoredTaxVaultData();
   if (els.rememberDraftToggle) {
     els.rememberDraftToggle.checked = false;
   }
@@ -5251,6 +5831,24 @@ function createSvgElement(tagName, attributes = {}) {
 /* ── Local Form Preview ── */
 
 const ACCEPTED_TYPES = ".pdf,.png,.jpg,.jpeg,.gif,.heic,.heif,.webp,.avif";
+const PDF_SIGNATURE = [0x25, 0x50, 0x44, 0x46];
+const PNG_SIGNATURE = [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a];
+const JPEG_SIGNATURE = [0xff, 0xd8, 0xff];
+const GIF87A_SIGNATURE = [0x47, 0x49, 0x46, 0x38, 0x37, 0x61];
+const GIF89A_SIGNATURE = [0x47, 0x49, 0x46, 0x38, 0x39, 0x61];
+const WEBP_RIFF_SIGNATURE = [0x52, 0x49, 0x46, 0x46];
+const WEBP_FORMAT_SIGNATURE = [0x57, 0x45, 0x42, 0x50];
+const ISO_BMFF_IMAGE_BRANDS = new Set([
+  "avif",
+  "avis",
+  "heic",
+  "heix",
+  "hevc",
+  "hevx",
+  "heif",
+  "mif1",
+  "msf1",
+]);
 
 function releasePreviewBlobUrl(target) {
   const blobUrl = target?.dataset?.blobUrl;
@@ -5283,6 +5881,67 @@ function getReferencePreviewKind(file) {
 
 function getReferenceFileKey(file) {
   return [file.name, file.size, file.lastModified].join(":");
+}
+
+function bytesStartWith(bytes, signature) {
+  return signature.every((value, index) => bytes[index] === value);
+}
+
+function asciiFromBytes(bytes, start, length) {
+  return Array.from(bytes.slice(start, start + length))
+    .map((value) => String.fromCharCode(value))
+    .join("");
+}
+
+function isIsoBmffImage(bytes) {
+  return bytes.length >= 12
+    && asciiFromBytes(bytes, 4, 4) === "ftyp"
+    && ISO_BMFF_IMAGE_BRANDS.has(asciiFromBytes(bytes, 8, 4));
+}
+
+function isRecognizedImageSignature(bytes) {
+  return (
+    bytesStartWith(bytes, PNG_SIGNATURE)
+    || bytesStartWith(bytes, JPEG_SIGNATURE)
+    || bytesStartWith(bytes, GIF87A_SIGNATURE)
+    || bytesStartWith(bytes, GIF89A_SIGNATURE)
+    || (
+      bytesStartWith(bytes, WEBP_RIFF_SIGNATURE)
+      && asciiFromBytes(bytes, 8, 4) === "WEBP"
+    )
+    || isIsoBmffImage(bytes)
+  );
+}
+
+async function readReferenceFileHeader(file, length = 32) {
+  try {
+    return new Uint8Array(await file.slice(0, length).arrayBuffer());
+  } catch {
+    return new Uint8Array();
+  }
+}
+
+async function validateReferenceFile(file) {
+  if (file.size > MAX_REFERENCE_FILE_SIZE) {
+    return { ok: false, reason: "oversized" };
+  }
+
+  const previewKind = getReferencePreviewKind(file);
+  if (!previewKind) {
+    return { ok: false, reason: "invalid-type" };
+  }
+
+  const header = await readReferenceFileHeader(file);
+  const contentLooksValid =
+    previewKind === "pdf"
+      ? bytesStartWith(header, PDF_SIGNATURE)
+      : isRecognizedImageSignature(header);
+
+  if (!contentLooksValid) {
+    return { ok: false, reason: "invalid-content" };
+  }
+
+  return { ok: true, previewKind };
 }
 
 function pluralize(count, singular, plural = `${singular}s`) {
@@ -5389,7 +6048,7 @@ function createReferencePreviewCard(file, previewKind, fileKey, previewSection, 
   return previewCard;
 }
 
-function addReferencePreviews(files, previewSection, previewList, formLabel, feedback) {
+async function addReferencePreviews(files, previewSection, previewList, formLabel, feedback) {
   if (!files.length) {
     return;
   }
@@ -5398,33 +6057,35 @@ function addReferencePreviews(files, previewSection, previewList, formLabel, fee
     Array.from(previewList.children).map((previewItem) => previewItem.dataset.fileKey)
   );
   const invalidNames = [];
+  const invalidContentNames = [];
   const oversizedNames = [];
   let duplicateCount = 0;
   let addedCount = 0;
 
-  files.forEach((file) => {
-    if (file.size > MAX_REFERENCE_FILE_SIZE) {
-      oversizedNames.push(file.name);
-      return;
-    }
-
-    const previewKind = getReferencePreviewKind(file);
-    if (!previewKind) {
-      invalidNames.push(file.name);
-      return;
+  for (const file of files) {
+    const validation = await validateReferenceFile(file);
+    if (!validation.ok) {
+      if (validation.reason === "oversized") {
+        oversizedNames.push(file.name);
+      } else if (validation.reason === "invalid-content") {
+        invalidContentNames.push(file.name);
+      } else {
+        invalidNames.push(file.name);
+      }
+      continue;
     }
 
     const fileKey = getReferenceFileKey(file);
     if (existingKeys.has(fileKey)) {
       duplicateCount += 1;
-      return;
+      continue;
     }
 
     existingKeys.add(fileKey);
     previewList.appendChild(
       createReferencePreviewCard(
         file,
-        previewKind,
+        validation.previewKind,
         fileKey,
         previewSection,
         previewList,
@@ -5433,7 +6094,7 @@ function addReferencePreviews(files, previewSection, previewList, formLabel, fee
       )
     );
     addedCount += 1;
-  });
+  }
 
   syncReferencePreviewState(previewSection, previewList, formLabel);
 
@@ -5457,6 +6118,13 @@ function addReferencePreviews(files, previewSection, previewList, formLabel, fee
     feedbackTone = "error";
     feedbackMessages.push(
       `Files over 50 MB cannot be previewed. Skipped: ${oversizedNames.join(", ")}.`
+    );
+  }
+
+  if (invalidContentNames.length > 0) {
+    feedbackTone = "error";
+    feedbackMessages.push(
+      `Some files did not match a supported PDF or image signature and were skipped: ${invalidContentNames.join(", ")}.`
     );
   }
 
@@ -5557,13 +6225,25 @@ function createReferenceZone(formLabel) {
     e.preventDefault();
     zone.classList.remove("dragover");
     if (e.dataTransfer.files.length > 0) {
-      addReferencePreviews(Array.from(e.dataTransfer.files), preview, previewList, formLabel, feedback);
+      void addReferencePreviews(
+        Array.from(e.dataTransfer.files),
+        preview,
+        previewList,
+        formLabel,
+        feedback
+      );
     }
   });
 
   fileInput.addEventListener("change", () => {
     if (fileInput.files.length > 0) {
-      addReferencePreviews(Array.from(fileInput.files), preview, previewList, formLabel, feedback);
+      void addReferencePreviews(
+        Array.from(fileInput.files),
+        preview,
+        previewList,
+        formLabel,
+        feedback
+      );
       fileInput.value = "";
     }
   });
