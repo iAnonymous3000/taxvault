@@ -320,6 +320,17 @@ test("Ctrl+Enter calculates a ready return from step 2", async ({ page }) => {
   await expect(page.locator("#step3")).toHaveClass(/active/);
 });
 
+test("clicking Calculate from a focused edited field still computes the return", async ({ page }) => {
+  await openApp(page);
+  await fillStep1Single(page);
+  await addSupportedW2(page);
+
+  await waitForReadyReview(page);
+  await expect(page.locator("#w2-1-med-wh")).toBeFocused();
+  await page.locator("#computeBtn").click();
+  await expect(page.locator("#step3")).toHaveClass(/active/);
+});
+
 test("draft status shows the last saved time and clear fields resets a W-2 card", async ({ page }) => {
   await openApp(page);
   await fillStep1Single(page);

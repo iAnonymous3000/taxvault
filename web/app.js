@@ -1,4 +1,5 @@
 import init, { compute_tax, get_app_config, review_tax_input } from "./pkg/taxvault_wasm.js";
+import { buildReviewPacketHtml as buildReviewPacketDocumentHtml } from "./modules/review_packet.js";
 
 const SSN_PATTERN = /^\d{3}-\d{2}-\d{4}$/;
 const EIN_PATTERN = /^\d{2}-\d{7}$/;
@@ -156,7 +157,11 @@ const state = {
   filingStatus: "single",
   draftEnvelopeCreatedAt: null,
   lastDraftSavedAt: null,
+  draftSnapshotDirty: true,
+  lastCapturedDraftSnapshot: null,
   lastSupportReview: null,
+  supportReviewStale: false,
+  lastBuiltPayloadResult: null,
   lastComputedResult: null,
   lastComputedDraftEnvelope: null,
   lastComputedSupportReview: null,
@@ -281,12 +286,13 @@ function bindStaticEvents() {
   els.exportAuditBtn?.addEventListener("click", exportAuditTrailToFile);
   els.linesToggle.addEventListener("click", toggleLines);
   els.traceToggle.addEventListener("click", toggleTrace);
+  els.app.addEventListener("click", handleAppClick);
   els.app.addEventListener("input", handleAppFieldMutation);
   els.app.addEventListener("change", handleAppFieldMutation);
   els.app.addEventListener("focusout", handleAppFieldBlur);
   document.addEventListener("keydown", handleDocumentKeydown);
 
-  bindSsnFields(document);
+  initializeSsnFields(document);
   bindMoneyFields(document);
   applyDateConstraints(document);
   updateDependentSubtitle(false);
@@ -962,6 +968,7 @@ function scheduleDraftSave() {
     return;
   }
 
+  markDraftSnapshotDirty();
   window.clearTimeout(draftSaveTimer);
   draftSaveTimer = window.setTimeout(() => {
     draftSaveTimer = 0;
@@ -1028,9 +1035,17 @@ function readTrimmedQueryValue(root, selector) {
   return readQueryValue(root, selector).trim();
 }
 
-function captureDraftSnapshot() {
+function markDraftSnapshotDirty() {
+  state.draftSnapshotDirty = true;
+}
+
+function cacheDraftSnapshot(snapshot) {
+  state.lastCapturedDraftSnapshot = snapshot;
+  state.draftSnapshotDirty = false;
+}
+
+function readDraftSnapshotFromDom() {
   return {
-    savedAt: new Date().toISOString(),
     filingStatus: state.filingStatus,
     currentStep: Math.min(state.currentStep, 2),
     hadResults: state.currentStep === 3,
@@ -1084,6 +1099,17 @@ function captureDraftSnapshot() {
       ordinaryDividends: readTrimmedQueryValue(card, ".dividend-ordinary"),
       qualifiedDividends: readTrimmedQueryValue(card, ".dividend-qualified"),
     })),
+  };
+}
+
+function captureDraftSnapshot() {
+  if (state.draftSnapshotDirty || !state.lastCapturedDraftSnapshot) {
+    cacheDraftSnapshot(readDraftSnapshotFromDom());
+  }
+
+  return {
+    ...state.lastCapturedDraftSnapshot,
+    savedAt: new Date().toISOString(),
   };
 }
 
@@ -1688,6 +1714,10 @@ function sanitizeDraftSnapshotForRestore(snapshot) {
   };
 }
 
+function buildEmptyDraftSnapshot() {
+  return sanitizeDraftSnapshotForRestore({});
+}
+
 function prepareDraftEnvelopeForRestore(rawDraft) {
   if (looksLikeDraftEnvelope(rawDraft)) {
     if (rawDraft.version !== DRAFT_ENVELOPE_VERSION) {
@@ -1833,6 +1863,7 @@ function restoreDraftSnapshot() {
 
 function applyDraftSnapshot(snapshot) {
   draftRestoreInProgress = true;
+  markDraftSnapshotDirty();
 
   try {
     resetComputedEstimate();
@@ -1911,107 +1942,34 @@ function applyAdjustmentInputs(adjustments = {}, estimatedTaxPayments = "") {
 }
 
 function restoreDependents(dependents) {
-  dependents.forEach((dependent) => {
-    const card = addDependent({ focusNewCard: false, batched: true });
-    if (!card) {
-      return;
-    }
-
-    card.querySelector(".dep-first").value = dependent.firstName || "";
-    card.querySelector(".dep-last").value = dependent.lastName || "";
-    card.querySelector(".dep-ssn").value = dependent.ssn || "";
-    card.querySelector(".dep-dob").value = dependent.dob || "";
-    card.querySelector(".dep-relationship").value = dependent.relationship || "";
-    card.querySelector(".dep-months").value = dependent.monthsLivedInHome || "";
-  });
+  restoreConfiguredCards(dependents, addDependent, applyDependentCardSnapshot);
 }
 
 function restoreW2Cards(w2s) {
-  w2s.forEach((w2) => {
-    const card = addW2({ focusNewCard: false, batched: true });
-    if (!card) {
-      return;
-    }
-
-    card.querySelector(".w2-employer").value = w2.employerName || "";
-    card.querySelector(".w2-recipient").value = w2.recipient || "primary";
-    card.querySelector(".w2-ein").value = w2.employerEin || "";
-    card.querySelector(".w2-fed-wh").value = w2.federalTaxWithheld || "";
-    card.querySelector(".w2-wages").value = w2.wages || "";
-    card.querySelector(".w2-state-wh").value = w2.stateTaxWithheld || "";
-    card.querySelector(".w2-ss-wages").value = w2.socialSecurityWages || "";
-    card.querySelector(".w2-ss-wh").value = w2.socialSecurityTaxWithheld || "";
-    card.querySelector(".w2-med-wages").value = w2.medicareWages || "";
-    card.querySelector(".w2-med-wh").value = w2.medicareTaxWithheld || "";
-    if (w2.advancedOpen) {
-      toggleAdvanced(card);
-    }
-  });
+  restoreConfiguredCards(w2s, addW2, applyW2CardSnapshot);
 }
 
 function restoreSocialSecurityCards(items) {
-  items.forEach((item) => {
-    const card = addSocialSecurity({ focusNewCard: false, batched: true });
-    if (!card) {
-      return;
-    }
-
-    card.querySelector(".ssa-recipient").value = item.recipient || "primary";
-    card.querySelector(".ssa-benefits").value = item.totalBenefits || "";
-    card.querySelector(".ssa-withholding").value = item.voluntaryWithholding || "";
-  });
+  restoreConfiguredCards(items, addSocialSecurity, applySocialSecurityCardSnapshot);
 }
 
 function restoreInterestCards(items) {
-  items.forEach((item) => {
-    const card = addInterest({ focusNewCard: false, batched: true });
-    if (!card) {
-      return;
-    }
-
-    card.querySelector(".interest-payer").value = item.payerName || "";
-    card.querySelector(".interest-recipient").value = item.recipient || "primary";
-    card.querySelector(".interest-taxable").value = item.taxableInterest || "";
-    card.querySelector(".interest-tax-exempt").value = item.taxExemptInterest || "";
-  });
+  restoreConfiguredCards(items, addInterest, applyInterestCardSnapshot);
 }
 
 function restoreDividendCards(items) {
-  items.forEach((item) => {
-    const card = addDividend({ focusNewCard: false, batched: true });
-    if (!card) {
-      return;
-    }
-
-    card.querySelector(".dividend-payer").value = item.payerName || "";
-    card.querySelector(".dividend-recipient").value = item.recipient || "primary";
-    card.querySelector(".dividend-ordinary").value = item.ordinaryDividends || "";
-    card.querySelector(".dividend-qualified").value = item.qualifiedDividends || "";
-  });
+  restoreConfiguredCards(items, addDividend, applyDividendCardSnapshot);
 }
 
-function bindSsnFields(root) {
+function initializeSsnFields(root) {
   root.querySelectorAll(".ssn-field").forEach((field) => {
-    if (field.dataset.bound === "true") {
+    const input = field.querySelector(".ssn-input");
+    const toggle = field.querySelector(".ssn-toggle");
+    if (!(input instanceof HTMLInputElement) || !(toggle instanceof HTMLButtonElement)) {
       return;
     }
 
-    const input = field.querySelector(".ssn-input");
-    const toggle = field.querySelector(".ssn-toggle");
-
-    input.addEventListener("input", (event) => {
-      event.target.value = formatDigits(event.target.value, [3, 2, 4]);
-    });
-
-    toggle.addEventListener("click", () => {
-      const nextVisible = input.type === "password";
-      setSsnVisibility(input, toggle, nextVisible);
-      input.focus({ preventScroll: true });
-      input.setSelectionRange(input.value.length, input.value.length);
-    });
-
     setSsnVisibility(input, toggle, false);
-    field.dataset.bound = "true";
   });
 }
 
@@ -2123,7 +2081,7 @@ function selectStatus(status, { autoSeedDependent = true, focusSelected = false 
   updateDependentSubtitle(isHoh);
 
   if (autoSeedDependent && isHoh && els.dependentContainer.children.length === 0) {
-    addDependent();
+    addDependent({ focusNewCard: false });
   }
 
   document.querySelectorAll(".income-recipient").forEach((select) => {
@@ -2513,20 +2471,8 @@ function validatePositiveMoneyValue(rawValue) {
   return Number.isFinite(value) && value > 0 ? "" : "Must be greater than 0";
 }
 
-function getInlineFieldValidationMessage(control) {
-  if (
-    !(control instanceof HTMLInputElement || control instanceof HTMLSelectElement || control instanceof HTMLTextAreaElement)
-    || control.disabled
-    || control.type === "hidden"
-    || control.type === "file"
-  ) {
-    return "";
-  }
-
-  const value = readTrimmedControlValue(control);
-  const id = control.id;
-
-  switch (id) {
+function getInlineBaseFieldValidationMessage(control, value) {
+  switch (control.id) {
     case "pFirst":
     case "pLast":
       return validateRequiredTextValue(value);
@@ -2547,208 +2493,261 @@ function getInlineFieldValidationMessage(control) {
     case "estimatedTaxPayments":
       return validateNonNegativeMoneyValue(value);
     default:
-      break;
+      return null;
   }
+}
 
-  const card = control.closest(".w2-card, .ssa-card, .interest-card, .dividend-card, .dependent-card");
-  const isActualW2Card = Boolean(
+function isW2IncomeCard(card) {
+  return Boolean(
     card?.classList.contains("w2-card")
     && !card.classList.contains("ssa-card")
     && !card.classList.contains("interest-card")
     && !card.classList.contains("dividend-card")
   );
+}
 
-  if (card?.classList.contains("dependent-card")) {
-    if (isBlankDependentCard(card)) {
-      return "";
+function getDependentInlineValidationMessage(control, card, value) {
+  if (isBlankDependentCard(card)) {
+    return "";
+  }
+
+  if (control.classList.contains("dep-first") || control.classList.contains("dep-last")) {
+    return validateRequiredTextValue(value);
+  }
+
+  if (control.classList.contains("dep-ssn")) {
+    return validateSsnValue(value);
+  }
+
+  if (control.classList.contains("dep-dob")) {
+    return validateDateValue(readControlValue(control));
+  }
+
+  if (control.classList.contains("dep-relationship")) {
+    return value ? "" : "Required";
+  }
+
+  if (control.classList.contains("dep-months")) {
+    const months = value === "" ? Number.NaN : Number(value);
+    return Number.isInteger(months) && months >= 0 && months <= 12 ? "" : "Enter 0-12";
+  }
+
+  return "";
+}
+
+function getW2InlineValidationMessage(control, card, value) {
+  if (isBlankW2Card(card)) {
+    return "";
+  }
+
+  if (control.classList.contains("w2-employer")) {
+    return validateRequiredTextValue(value);
+  }
+
+  if (control.classList.contains("w2-ein")) {
+    if (!value) {
+      return "Required";
     }
+    return EIN_PATTERN.test(value) ? "" : "Format: 12-3456789";
+  }
 
-    if (control.classList.contains("dep-first") || control.classList.contains("dep-last")) {
-      return validateRequiredTextValue(value);
-    }
+  if (control.classList.contains("w2-wages")) {
+    return validatePositiveMoneyValue(value);
+  }
 
-    if (control.classList.contains("dep-ssn")) {
-      return validateSsnValue(value);
-    }
-
-    if (control.classList.contains("dep-dob")) {
-      return validateDateValue(readControlValue(control));
-    }
-
-    if (control.classList.contains("dep-relationship")) {
-      return value ? "" : "Required";
-    }
-
-    if (control.classList.contains("dep-months")) {
-      const months = value === "" ? Number.NaN : Number(value);
-      return Number.isInteger(months) && months >= 0 && months <= 12
-        ? ""
-        : "Enter 0-12";
+  if (
+    control.classList.contains("w2-fed-wh")
+    || control.classList.contains("w2-state-wh")
+    || control.classList.contains("w2-ss-wh")
+    || control.classList.contains("w2-med-wh")
+  ) {
+    const baseError = validateNonNegativeMoneyValue(value);
+    if (baseError) {
+      return baseError;
     }
   }
 
-  if (isActualW2Card) {
-    if (isBlankW2Card(card)) {
+  if (control.classList.contains("w2-ss-wages") || control.classList.contains("w2-med-wages")) {
+    if (value === "") {
       return "";
     }
+    const baseError = validateNonNegativeMoneyValue(value);
+    if (baseError) {
+      return baseError;
+    }
+  }
 
-    if (control.classList.contains("w2-employer")) {
-      return validateRequiredTextValue(value);
+  const wages = parseMoney(readTrimmedQueryValue(card, ".w2-wages"));
+  const federalTaxWithheld = parseMoney(readTrimmedQueryValue(card, ".w2-fed-wh"), 0);
+  const socialSecurityWagesRaw = readTrimmedQueryValue(card, ".w2-ss-wages");
+  const socialSecurityWages =
+    socialSecurityWagesRaw === "" ? wages : parseMoney(socialSecurityWagesRaw);
+  const socialSecurityTaxWithheld = parseMoney(readTrimmedQueryValue(card, ".w2-ss-wh"), 0);
+  const medicareWagesRaw = readTrimmedQueryValue(card, ".w2-med-wages");
+  const medicareWages = medicareWagesRaw === "" ? wages : parseMoney(medicareWagesRaw);
+  const medicareTaxWithheld = parseMoney(readTrimmedQueryValue(card, ".w2-med-wh"), 0);
+
+  if (
+    control.classList.contains("w2-fed-wh")
+    && Number.isFinite(wages)
+    && Number.isFinite(federalTaxWithheld)
+    && federalTaxWithheld > wages
+  ) {
+    return "Cannot exceed wages";
+  }
+
+  if (
+    (control.classList.contains("w2-ss-wages") || control.classList.contains("w2-ss-wh"))
+    && Number.isFinite(socialSecurityWages)
+    && Number.isFinite(socialSecurityTaxWithheld)
+    && socialSecurityTaxWithheld > socialSecurityWages
+  ) {
+    return "Withholding cannot exceed SS wages";
+  }
+
+  if (
+    (control.classList.contains("w2-med-wages") || control.classList.contains("w2-med-wh"))
+    && Number.isFinite(medicareWages)
+    && Number.isFinite(medicareTaxWithheld)
+    && medicareTaxWithheld > medicareWages
+  ) {
+    return "Withholding cannot exceed Medicare wages";
+  }
+
+  return "";
+}
+
+function getInterestInlineValidationMessage(control, card, value) {
+  if (isBlankInterestCard(card)) {
+    return "";
+  }
+
+  if (control.classList.contains("interest-taxable") || control.classList.contains("interest-tax-exempt")) {
+    const baseError = validateNonNegativeMoneyValue(value);
+    if (baseError) {
+      return baseError;
     }
 
-    if (control.classList.contains("w2-ein")) {
-      if (!value) {
-        return "Required";
-      }
-      return EIN_PATTERN.test(value) ? "" : "Format: 12-3456789";
+    const taxableInterest = parseMoney(readTrimmedQueryValue(card, ".interest-taxable"), 0);
+    const taxExemptInterest = parseMoney(readTrimmedQueryValue(card, ".interest-tax-exempt"), 0);
+    if (
+      Number.isFinite(taxableInterest)
+      && Number.isFinite(taxExemptInterest)
+      && taxableInterest === 0
+      && taxExemptInterest === 0
+    ) {
+      return "Enter taxable or tax-exempt interest";
+    }
+  }
+
+  return "";
+}
+
+function getSocialSecurityInlineValidationMessage(control, card, value) {
+  if (isBlankSocialSecurityCard(card)) {
+    return "";
+  }
+
+  if (control.classList.contains("ssa-benefits")) {
+    const baseError = validatePositiveMoneyValue(value);
+    if (baseError) {
+      return baseError;
+    }
+  }
+
+  if (control.classList.contains("ssa-withholding")) {
+    const baseError = validateNonNegativeMoneyValue(value);
+    if (baseError) {
+      return baseError;
+    }
+  }
+
+  const totalBenefits = parseMoney(readTrimmedQueryValue(card, ".ssa-benefits"));
+  const voluntaryWithholding = parseMoney(readTrimmedQueryValue(card, ".ssa-withholding"), 0);
+  if (
+    control.classList.contains("ssa-withholding")
+    && Number.isFinite(totalBenefits)
+    && Number.isFinite(voluntaryWithholding)
+    && voluntaryWithholding > totalBenefits
+  ) {
+    return "Cannot exceed total benefits";
+  }
+
+  return "";
+}
+
+function getDividendInlineValidationMessage(control, card, value) {
+  if (isBlankDividendCard(card)) {
+    return "";
+  }
+
+  if (control.classList.contains("dividend-ordinary") || control.classList.contains("dividend-qualified")) {
+    const baseError = validateNonNegativeMoneyValue(value);
+    if (baseError) {
+      return baseError;
     }
 
-    if (control.classList.contains("w2-wages")) {
-      return validatePositiveMoneyValue(value);
+    const ordinaryDividends = parseMoney(readTrimmedQueryValue(card, ".dividend-ordinary"), 0);
+    const qualifiedDividends = parseMoney(readTrimmedQueryValue(card, ".dividend-qualified"), 0);
+
+    if (
+      Number.isFinite(ordinaryDividends)
+      && Number.isFinite(qualifiedDividends)
+      && ordinaryDividends === 0
+      && qualifiedDividends === 0
+    ) {
+      return "Enter ordinary or qualified dividends";
     }
 
     if (
-      control.classList.contains("w2-fed-wh")
-      || control.classList.contains("w2-state-wh")
-      || control.classList.contains("w2-ss-wh")
-      || control.classList.contains("w2-med-wh")
+      control.classList.contains("dividend-qualified")
+      && Number.isFinite(ordinaryDividends)
+      && Number.isFinite(qualifiedDividends)
+      && qualifiedDividends > ordinaryDividends
     ) {
-      const baseError = validateNonNegativeMoneyValue(value);
-      if (baseError) {
-        return baseError;
-      }
+      return "Cannot exceed ordinary dividends";
     }
+  }
 
-    if (control.classList.contains("w2-ss-wages") || control.classList.contains("w2-med-wages")) {
-      if (value === "") {
-        return "";
-      }
-      const baseError = validateNonNegativeMoneyValue(value);
-      if (baseError) {
-        return baseError;
-      }
-    }
+  return "";
+}
 
-    const wages = parseMoney(readTrimmedQueryValue(card, ".w2-wages"));
-    const federalTaxWithheld = parseMoney(readTrimmedQueryValue(card, ".w2-fed-wh"), 0);
-    const socialSecurityWagesRaw = readTrimmedQueryValue(card, ".w2-ss-wages");
-    const socialSecurityWages =
-      socialSecurityWagesRaw === "" ? wages : parseMoney(socialSecurityWagesRaw);
-    const socialSecurityTaxWithheld = parseMoney(readTrimmedQueryValue(card, ".w2-ss-wh"), 0);
-    const medicareWagesRaw = readTrimmedQueryValue(card, ".w2-med-wages");
-    const medicareWages = medicareWagesRaw === "" ? wages : parseMoney(medicareWagesRaw);
-    const medicareTaxWithheld = parseMoney(readTrimmedQueryValue(card, ".w2-med-wh"), 0);
+function getInlineFieldValidationMessage(control) {
+  if (
+    !(control instanceof HTMLInputElement || control instanceof HTMLSelectElement || control instanceof HTMLTextAreaElement)
+    || control.disabled
+    || control.type === "hidden"
+    || control.type === "file"
+  ) {
+    return "";
+  }
 
-    if (
-      control.classList.contains("w2-fed-wh")
-      && Number.isFinite(wages)
-      && Number.isFinite(federalTaxWithheld)
-      && federalTaxWithheld > wages
-    ) {
-      return "Cannot exceed wages";
-    }
+  const value = readTrimmedControlValue(control);
+  const baseFieldMessage = getInlineBaseFieldValidationMessage(control, value);
+  if (baseFieldMessage !== null) {
+    return baseFieldMessage;
+  }
 
-    if (
-      (control.classList.contains("w2-ss-wages") || control.classList.contains("w2-ss-wh"))
-      && Number.isFinite(socialSecurityWages)
-      && Number.isFinite(socialSecurityTaxWithheld)
-      && socialSecurityTaxWithheld > socialSecurityWages
-    ) {
-      return "Withholding cannot exceed SS wages";
-    }
+  const card = control.closest(".w2-card, .ssa-card, .interest-card, .dividend-card, .dependent-card");
 
-    if (
-      (control.classList.contains("w2-med-wages") || control.classList.contains("w2-med-wh"))
-      && Number.isFinite(medicareWages)
-      && Number.isFinite(medicareTaxWithheld)
-      && medicareTaxWithheld > medicareWages
-    ) {
-      return "Withholding cannot exceed Medicare wages";
-    }
+  if (card?.classList.contains("dependent-card")) {
+    return getDependentInlineValidationMessage(control, card, value);
+  }
+
+  if (isW2IncomeCard(card)) {
+    return getW2InlineValidationMessage(control, card, value);
   }
 
   if (card?.classList.contains("interest-card")) {
-    if (isBlankInterestCard(card)) {
-      return "";
-    }
-
-    if (control.classList.contains("interest-taxable") || control.classList.contains("interest-tax-exempt")) {
-      const baseError = validateNonNegativeMoneyValue(value);
-      if (baseError) {
-        return baseError;
-      }
-
-      const taxableInterest = parseMoney(readTrimmedQueryValue(card, ".interest-taxable"), 0);
-      const taxExemptInterest = parseMoney(readTrimmedQueryValue(card, ".interest-tax-exempt"), 0);
-      if (Number.isFinite(taxableInterest) && Number.isFinite(taxExemptInterest) && taxableInterest === 0 && taxExemptInterest === 0) {
-        return "Enter taxable or tax-exempt interest";
-      }
-    }
+    return getInterestInlineValidationMessage(control, card, value);
   }
 
   if (card?.classList.contains("ssa-card")) {
-    if (isBlankSocialSecurityCard(card)) {
-      return "";
-    }
-
-    if (control.classList.contains("ssa-benefits")) {
-      const baseError = validatePositiveMoneyValue(value);
-      if (baseError) {
-        return baseError;
-      }
-    }
-
-    if (control.classList.contains("ssa-withholding")) {
-      const baseError = validateNonNegativeMoneyValue(value);
-      if (baseError) {
-        return baseError;
-      }
-    }
-
-    const totalBenefits = parseMoney(readTrimmedQueryValue(card, ".ssa-benefits"));
-    const voluntaryWithholding = parseMoney(readTrimmedQueryValue(card, ".ssa-withholding"), 0);
-    if (
-      control.classList.contains("ssa-withholding")
-      && Number.isFinite(totalBenefits)
-      && Number.isFinite(voluntaryWithholding)
-      && voluntaryWithholding > totalBenefits
-    ) {
-      return "Cannot exceed total benefits";
-    }
+    return getSocialSecurityInlineValidationMessage(control, card, value);
   }
 
   if (card?.classList.contains("dividend-card")) {
-    if (isBlankDividendCard(card)) {
-      return "";
-    }
-
-    if (control.classList.contains("dividend-ordinary") || control.classList.contains("dividend-qualified")) {
-      const baseError = validateNonNegativeMoneyValue(value);
-      if (baseError) {
-        return baseError;
-      }
-
-      const ordinaryDividends = parseMoney(readTrimmedQueryValue(card, ".dividend-ordinary"), 0);
-      const qualifiedDividends = parseMoney(readTrimmedQueryValue(card, ".dividend-qualified"), 0);
-
-      if (
-        Number.isFinite(ordinaryDividends)
-        && Number.isFinite(qualifiedDividends)
-        && ordinaryDividends === 0
-        && qualifiedDividends === 0
-      ) {
-        return "Enter ordinary or qualified dividends";
-      }
-
-      if (
-        control.classList.contains("dividend-qualified")
-        && Number.isFinite(ordinaryDividends)
-        && Number.isFinite(qualifiedDividends)
-        && qualifiedDividends > ordinaryDividends
-      ) {
-        return "Cannot exceed ordinary dividends";
-      }
-    }
+    return getDividendInlineValidationMessage(control, card, value);
   }
 
   return "";
@@ -3004,14 +3003,87 @@ function createSsnField(inputId, inputClass) {
   return wrapper;
 }
 
-function addW2({ focusNewCard = true, batched = false } = {}) {
-  if (!canAddCard(els.w2Container, MAX_W2_FORMS, "W-2 forms")) {
+function buildDynamicCardChildren(cardConfig, idPrefix, count) {
+  const sections = cardConfig.buildSections(idPrefix, count);
+  return cardConfig.referenceLabel ? [createReferenceZone(cardConfig.referenceLabel), ...sections] : sections;
+}
+
+function applyDynamicCardMutation(cardConfig, { batched = false, announceMessage = "" } = {}) {
+  cardConfig.updateRemoveButtons();
+  cardConfig.afterStructureChange?.();
+
+  if (batched) {
+    return;
+  }
+
+  resetComputedEstimate();
+  scheduleSupportReview();
+  scheduleDraftSave();
+
+  if (announceMessage) {
+    announceUiStatus(announceMessage);
+  }
+}
+
+function createDynamicCard(cardConfig, { focusNewCard = true, batched = false } = {}) {
+  if (!canAddCard(cardConfig.container, cardConfig.maxCount, cardConfig.limitLabel)) {
     return null;
   }
 
-  state.w2Count += 1;
-  const idPrefix = `w2-${state.w2Count}`;
-  const card = createCardSection("w2-card", state.w2Count);
+  state[cardConfig.countKey] += 1;
+  const count = state[cardConfig.countKey];
+  const idPrefix = `${cardConfig.idPrefix}-${count}`;
+  const card = createCardSection(cardConfig.cardClassName, count);
+  card.dataset.cardType = cardConfig.cardType;
+
+  card.append(
+    createCardHeader(`${cardConfig.titleLabel} #${count}`, {
+      clearButtonClass: cardConfig.clearButtonClass,
+      removeButtonClass: cardConfig.removeButtonClass,
+    }),
+    ...buildDynamicCardChildren(cardConfig, idPrefix, count)
+  );
+
+  cardConfig.initializeCard?.(card);
+  bindMoneyFields(card);
+
+  cardConfig.container.append(card);
+  applyDynamicCardMutation(cardConfig, {
+    batched,
+    announceMessage: cardConfig.addAnnouncement(count),
+  });
+  if (focusNewCard && !batched) {
+    focusFirstField(card, cardConfig.focusSelector);
+  }
+
+  return card;
+}
+
+function removeDynamicCard(card, cardConfig) {
+  const focusTarget = nextFocusTargetAfterRemoval(card, cardConfig.addButton);
+  if (cardConfig.cleanupReferences) {
+    cleanupReferencePreviews(card);
+  }
+
+  card.remove();
+  applyDynamicCardMutation(cardConfig, {
+    announceMessage: cardConfig.removeAnnouncement,
+  });
+  focusElement(focusTarget);
+}
+
+function restoreConfiguredCards(items, addCard, applySnapshot) {
+  items.forEach((item) => {
+    const card = addCard({ focusNewCard: false, batched: true });
+    if (!card) {
+      return;
+    }
+
+    applySnapshot(card, item);
+  });
+}
+
+function buildW2CardSections(idPrefix) {
   const essential = createElement("div", { className: "w2-essential" });
   essential.append(
     createRow(
@@ -3123,62 +3195,27 @@ function addW2({ focusNewCard = true, batched = false } = {}) {
   const advanced = createElement("div", { className: "w2-advanced" });
   advanced.append(advancedToggle, advancedFields);
 
-  card.append(
-    createCardHeader(`W-2 #${state.w2Count}`, {
-      clearButtonClass: "clear-w2-btn",
-      removeButtonClass: "remove-w2-btn",
-    }),
-    createReferenceZone("W-2"),
-    essential,
-    advanced
-  );
-
-  card.querySelector(".remove-w2-btn").addEventListener("click", () => removeW2(card));
-  card
-    .querySelector(".clear-w2-btn")
-    .addEventListener("click", () =>
-      clearCardFields(card, {
-        label: "W-2",
-        focusSelector: ".w2-employer",
-        closeAdvanced: true,
-      })
-    );
-  card.querySelector(".w2-advanced-toggle").addEventListener("click", () => toggleAdvanced(card));
-  card.querySelector(".w2-ein").addEventListener("input", (event) => {
-    event.target.value = formatDigits(event.target.value, [2, 7]);
-  });
-  bindMoneyFields(card);
-
-  els.w2Container.append(card);
-  updateRemoveButtons();
-  if (!batched) {
-    renderIncomeSummaryChips();
-    resetComputedEstimate();
-    scheduleSupportReview();
-    scheduleDraftSave();
-    announceUiStatus(`Added W-2 #${state.w2Count}.`);
-  }
-  if (focusNewCard && !batched) {
-    focusFirstField(card, ".w2-employer");
-  }
-
-  return card;
+  return [essential, advanced];
 }
 
-function addSocialSecurity({ focusNewCard = true, batched = false } = {}) {
-  if (!canAddCard(els.socialSecurityContainer, MAX_SOCIAL_SECURITY_FORMS, "SSA-1099 forms")) {
-    return null;
+function applyW2CardSnapshot(card, w2) {
+  card.querySelector(".w2-employer").value = w2.employerName || "";
+  card.querySelector(".w2-recipient").value = w2.recipient || "primary";
+  card.querySelector(".w2-ein").value = w2.employerEin || "";
+  card.querySelector(".w2-fed-wh").value = w2.federalTaxWithheld || "";
+  card.querySelector(".w2-wages").value = w2.wages || "";
+  card.querySelector(".w2-state-wh").value = w2.stateTaxWithheld || "";
+  card.querySelector(".w2-ss-wages").value = w2.socialSecurityWages || "";
+  card.querySelector(".w2-ss-wh").value = w2.socialSecurityTaxWithheld || "";
+  card.querySelector(".w2-med-wages").value = w2.medicareWages || "";
+  card.querySelector(".w2-med-wh").value = w2.medicareTaxWithheld || "";
+  if (w2.advancedOpen) {
+    toggleAdvanced(card);
   }
+}
 
-  state.socialSecurityCount += 1;
-  const idPrefix = `ssa-${state.socialSecurityCount}`;
-  const card = createCardSection("w2-card ssa-card", state.socialSecurityCount);
-  card.append(
-    createCardHeader(`SSA-1099 #${state.socialSecurityCount}`, {
-      clearButtonClass: "clear-ssa-btn",
-      removeButtonClass: "remove-ssa-btn",
-    }),
-    createReferenceZone("SSA-1099"),
+function buildSocialSecurityCardSections(idPrefix) {
+  return [
     createRow(
       createField(
         "Recipient",
@@ -3202,50 +3239,18 @@ function addSocialSecurity({ focusNewCard = true, batched = false } = {}) {
           placeholder: "0.00",
         })
       )
-    )
-  );
-
-  card.querySelector(".remove-ssa-btn").addEventListener("click", () => removeSocialSecurity(card));
-  card
-    .querySelector(".clear-ssa-btn")
-    .addEventListener("click", () =>
-      clearCardFields(card, {
-        label: "SSA-1099",
-        focusSelector: ".ssa-benefits",
-      })
-    );
-  bindMoneyFields(card);
-
-  els.socialSecurityContainer.append(card);
-  updateSocialSecurityRemoveButtons();
-  if (!batched) {
-    renderIncomeSummaryChips();
-    resetComputedEstimate();
-    scheduleSupportReview();
-    scheduleDraftSave();
-    announceUiStatus(`Added SSA-1099 #${state.socialSecurityCount}.`);
-  }
-  if (focusNewCard && !batched) {
-    focusFirstField(card, ".ssa-benefits");
-  }
-
-  return card;
+    ),
+  ];
 }
 
-function addInterest({ focusNewCard = true, batched = false } = {}) {
-  if (!canAddCard(els.interestContainer, MAX_INTEREST_FORMS, "1099-INT forms")) {
-    return null;
-  }
+function applySocialSecurityCardSnapshot(card, item) {
+  card.querySelector(".ssa-recipient").value = item.recipient || "primary";
+  card.querySelector(".ssa-benefits").value = item.totalBenefits || "";
+  card.querySelector(".ssa-withholding").value = item.voluntaryWithholding || "";
+}
 
-  state.interestCount += 1;
-  const idPrefix = `int-${state.interestCount}`;
-  const card = createCardSection("w2-card interest-card", state.interestCount);
-  card.append(
-    createCardHeader(`1099-INT #${state.interestCount}`, {
-      clearButtonClass: "clear-interest-btn",
-      removeButtonClass: "remove-interest-btn",
-    }),
-    createReferenceZone("1099-INT"),
+function buildInterestCardSections(idPrefix) {
+  return [
     createRow(
       createField(
         "Institution Name (Optional)",
@@ -3278,52 +3283,19 @@ function addInterest({ focusNewCard = true, batched = false } = {}) {
           placeholder: "0.00",
         })
       )
-    )
-  );
-
-  card
-    .querySelector(".remove-interest-btn")
-    .addEventListener("click", () => removeInterest(card));
-  card
-    .querySelector(".clear-interest-btn")
-    .addEventListener("click", () =>
-      clearCardFields(card, {
-        label: "1099-INT",
-        focusSelector: ".interest-taxable",
-      })
-    );
-  bindMoneyFields(card);
-
-  els.interestContainer.append(card);
-  updateInterestRemoveButtons();
-  if (!batched) {
-    renderIncomeSummaryChips();
-    resetComputedEstimate();
-    scheduleSupportReview();
-    scheduleDraftSave();
-    announceUiStatus(`Added 1099-INT #${state.interestCount}.`);
-  }
-  if (focusNewCard && !batched) {
-    focusFirstField(card, ".interest-taxable");
-  }
-
-  return card;
+    ),
+  ];
 }
 
-function addDividend({ focusNewCard = true, batched = false } = {}) {
-  if (!canAddCard(els.dividendContainer, MAX_DIVIDEND_FORMS, "1099-DIV forms")) {
-    return null;
-  }
+function applyInterestCardSnapshot(card, item) {
+  card.querySelector(".interest-payer").value = item.payerName || "";
+  card.querySelector(".interest-recipient").value = item.recipient || "primary";
+  card.querySelector(".interest-taxable").value = item.taxableInterest || "";
+  card.querySelector(".interest-tax-exempt").value = item.taxExemptInterest || "";
+}
 
-  state.dividendCount += 1;
-  const idPrefix = `div-${state.dividendCount}`;
-  const card = createCardSection("w2-card dividend-card", state.dividendCount);
-  card.append(
-    createCardHeader(`1099-DIV #${state.dividendCount}`, {
-      clearButtonClass: "clear-dividend-btn",
-      removeButtonClass: "remove-dividend-btn",
-    }),
-    createReferenceZone("1099-DIV"),
+function buildDividendCardSections(idPrefix) {
+  return [
     createRow(
       createField(
         "Institution Name (Optional)",
@@ -3356,51 +3328,19 @@ function addDividend({ focusNewCard = true, batched = false } = {}) {
           placeholder: "0.00",
         })
       )
-    )
-  );
-
-  card
-    .querySelector(".remove-dividend-btn")
-    .addEventListener("click", () => removeDividend(card));
-  card
-    .querySelector(".clear-dividend-btn")
-    .addEventListener("click", () =>
-      clearCardFields(card, {
-        label: "1099-DIV",
-        focusSelector: ".dividend-ordinary",
-      })
-    );
-  bindMoneyFields(card);
-
-  els.dividendContainer.append(card);
-  updateDividendRemoveButtons();
-  if (!batched) {
-    renderIncomeSummaryChips();
-    resetComputedEstimate();
-    scheduleSupportReview();
-    scheduleDraftSave();
-    announceUiStatus(`Added 1099-DIV #${state.dividendCount}.`);
-  }
-  if (focusNewCard && !batched) {
-    focusFirstField(card, ".dividend-ordinary");
-  }
-
-  return card;
+    ),
+  ];
 }
 
-function addDependent({ focusNewCard = true, batched = false } = {}) {
-  if (!canAddCard(els.dependentContainer, MAX_DEPENDENTS, "dependents")) {
-    return null;
-  }
+function applyDividendCardSnapshot(card, item) {
+  card.querySelector(".dividend-payer").value = item.payerName || "";
+  card.querySelector(".dividend-recipient").value = item.recipient || "primary";
+  card.querySelector(".dividend-ordinary").value = item.ordinaryDividends || "";
+  card.querySelector(".dividend-qualified").value = item.qualifiedDividends || "";
+}
 
-  state.dependentCount += 1;
-  const idPrefix = `dep-${state.dependentCount}`;
-  const card = createCardSection("dependent-card", state.dependentCount);
-  card.append(
-    createCardHeader(`Dependent #${state.dependentCount}`, {
-      clearButtonClass: "clear-dependent-btn",
-      removeButtonClass: "remove-dependent-btn",
-    }),
+function buildDependentCardSections(idPrefix) {
+  return [
     createRow(
       createField(
         "First Name",
@@ -3460,95 +3400,193 @@ function addDependent({ focusNewCard = true, batched = false } = {}) {
           placeholder: "12",
         })
       )
-    )
-  );
+    ),
+  ];
+}
 
-  card.querySelector(".remove-dependent-btn").addEventListener("click", () => removeDependent(card));
-  card
-    .querySelector(".clear-dependent-btn")
-    .addEventListener("click", () =>
-      clearCardFields(card, {
-        label: "dependent",
-        focusSelector: ".dep-first",
-      })
-    );
-  bindSsnFields(card);
-  applyDateConstraints(card);
+function applyDependentCardSnapshot(card, dependent) {
+  card.querySelector(".dep-first").value = dependent.firstName || "";
+  card.querySelector(".dep-last").value = dependent.lastName || "";
+  card.querySelector(".dep-ssn").value = dependent.ssn || "";
+  card.querySelector(".dep-dob").value = dependent.dob || "";
+  card.querySelector(".dep-relationship").value = dependent.relationship || "";
+  card.querySelector(".dep-months").value = dependent.monthsLivedInHome || "";
+}
 
-  els.dependentContainer.append(card);
-  updateDependentRemoveButtons();
-  if (!batched) {
-    resetComputedEstimate();
-    scheduleDraftSave();
-    announceUiStatus(`Added dependent #${state.dependentCount}.`);
+const W2_CARD_CONFIG = {
+  cardType: "w2",
+  container: els.w2Container,
+  addButton: els.addW2Btn,
+  maxCount: MAX_W2_FORMS,
+  limitLabel: "W-2 forms",
+  countKey: "w2Count",
+  idPrefix: "w2",
+  cardClassName: "w2-card",
+  titleLabel: "W-2",
+  referenceLabel: "W-2",
+  clearButtonClass: "clear-w2-btn",
+  removeButtonClass: "remove-w2-btn",
+  clearOptions: {
+    label: "W-2",
+    focusSelector: ".w2-employer",
+    closeAdvanced: true,
+  },
+  focusSelector: ".w2-employer",
+  buildSections: buildW2CardSections,
+  updateRemoveButtons,
+  addAnnouncement: (count) => `Added W-2 #${count}.`,
+  removeAnnouncement: "Removed W-2 form.",
+  cleanupReferences: true,
+  afterStructureChange: renderIncomeSummaryChips,
+};
+
+const SOCIAL_SECURITY_CARD_CONFIG = {
+  cardType: "socialSecurity",
+  container: els.socialSecurityContainer,
+  addButton: els.addSocialSecurityBtn,
+  maxCount: MAX_SOCIAL_SECURITY_FORMS,
+  limitLabel: "SSA-1099 forms",
+  countKey: "socialSecurityCount",
+  idPrefix: "ssa",
+  cardClassName: "w2-card ssa-card",
+  titleLabel: "SSA-1099",
+  referenceLabel: "SSA-1099",
+  clearButtonClass: "clear-ssa-btn",
+  removeButtonClass: "remove-ssa-btn",
+  clearOptions: {
+    label: "SSA-1099",
+    focusSelector: ".ssa-benefits",
+  },
+  focusSelector: ".ssa-benefits",
+  buildSections: buildSocialSecurityCardSections,
+  updateRemoveButtons: updateSocialSecurityRemoveButtons,
+  addAnnouncement: (count) => `Added SSA-1099 #${count}.`,
+  removeAnnouncement: "Removed SSA-1099 form.",
+  cleanupReferences: true,
+  afterStructureChange: renderIncomeSummaryChips,
+};
+
+const INTEREST_CARD_CONFIG = {
+  cardType: "interest",
+  container: els.interestContainer,
+  addButton: els.addInterestBtn,
+  maxCount: MAX_INTEREST_FORMS,
+  limitLabel: "1099-INT forms",
+  countKey: "interestCount",
+  idPrefix: "int",
+  cardClassName: "w2-card interest-card",
+  titleLabel: "1099-INT",
+  referenceLabel: "1099-INT",
+  clearButtonClass: "clear-interest-btn",
+  removeButtonClass: "remove-interest-btn",
+  clearOptions: {
+    label: "1099-INT",
+    focusSelector: ".interest-taxable",
+  },
+  focusSelector: ".interest-taxable",
+  buildSections: buildInterestCardSections,
+  updateRemoveButtons: updateInterestRemoveButtons,
+  addAnnouncement: (count) => `Added 1099-INT #${count}.`,
+  removeAnnouncement: "Removed 1099-INT form.",
+  cleanupReferences: true,
+  afterStructureChange: renderIncomeSummaryChips,
+};
+
+const DIVIDEND_CARD_CONFIG = {
+  cardType: "dividend",
+  container: els.dividendContainer,
+  addButton: els.addDividendBtn,
+  maxCount: MAX_DIVIDEND_FORMS,
+  limitLabel: "1099-DIV forms",
+  countKey: "dividendCount",
+  idPrefix: "div",
+  cardClassName: "w2-card dividend-card",
+  titleLabel: "1099-DIV",
+  referenceLabel: "1099-DIV",
+  clearButtonClass: "clear-dividend-btn",
+  removeButtonClass: "remove-dividend-btn",
+  clearOptions: {
+    label: "1099-DIV",
+    focusSelector: ".dividend-ordinary",
+  },
+  focusSelector: ".dividend-ordinary",
+  buildSections: buildDividendCardSections,
+  updateRemoveButtons: updateDividendRemoveButtons,
+  addAnnouncement: (count) => `Added 1099-DIV #${count}.`,
+  removeAnnouncement: "Removed 1099-DIV form.",
+  cleanupReferences: true,
+  afterStructureChange: renderIncomeSummaryChips,
+};
+
+const DEPENDENT_CARD_CONFIG = {
+  cardType: "dependent",
+  container: els.dependentContainer,
+  addButton: els.addDependentBtn,
+  maxCount: MAX_DEPENDENTS,
+  limitLabel: "dependents",
+  countKey: "dependentCount",
+  idPrefix: "dep",
+  cardClassName: "dependent-card",
+  titleLabel: "Dependent",
+  clearButtonClass: "clear-dependent-btn",
+  removeButtonClass: "remove-dependent-btn",
+  clearOptions: {
+    label: "dependent",
+    focusSelector: ".dep-first",
+  },
+  focusSelector: ".dep-first",
+  buildSections: buildDependentCardSections,
+  initializeCard: (card) => {
+    initializeSsnFields(card);
+    applyDateConstraints(card);
+  },
+  updateRemoveButtons: updateDependentRemoveButtons,
+  addAnnouncement: (count) => `Added dependent #${count}.`,
+  removeAnnouncement: "Removed dependent.",
+};
+
+function addW2(options = {}) {
+  return createDynamicCard(W2_CARD_CONFIG, options);
+}
+
+function addSocialSecurity(options = {}) {
+  return createDynamicCard(SOCIAL_SECURITY_CARD_CONFIG, options);
+}
+
+function addInterest(options = {}) {
+  return createDynamicCard(INTEREST_CARD_CONFIG, options);
+}
+
+function addDividend(options = {}) {
+  return createDynamicCard(DIVIDEND_CARD_CONFIG, options);
+}
+
+function addDependent({ focusNewCard = true, batched = false } = {}) {
+  return createDynamicCard(DEPENDENT_CARD_CONFIG, { focusNewCard, batched });
+}
+
+const DYNAMIC_CARD_CONFIGS = [
+  W2_CARD_CONFIG,
+  SOCIAL_SECURITY_CARD_CONFIG,
+  INTEREST_CARD_CONFIG,
+  DIVIDEND_CARD_CONFIG,
+  DEPENDENT_CARD_CONFIG,
+];
+
+const DYNAMIC_CARD_CONFIG_BY_TYPE = Object.fromEntries(
+  DYNAMIC_CARD_CONFIGS.map((config) => [config.cardType, config])
+);
+
+function getDynamicCardContext(target) {
+  const card = target.closest("[data-card-type]");
+  if (!(card instanceof HTMLElement)) {
+    return { card: null, config: null };
   }
-  if (focusNewCard && !batched) {
-    focusFirstField(card, ".dep-first");
-  }
 
-  return card;
-}
-
-function removeW2(card) {
-  const focusTarget = nextFocusTargetAfterRemoval(card, els.addW2Btn);
-  cleanupReferencePreviews(card);
-  card.remove();
-  updateRemoveButtons();
-  renderIncomeSummaryChips();
-  resetComputedEstimate();
-  scheduleSupportReview();
-  scheduleDraftSave();
-  focusElement(focusTarget);
-  announceUiStatus("Removed W-2 form.");
-}
-
-function removeInterest(card) {
-  const focusTarget = nextFocusTargetAfterRemoval(card, els.addInterestBtn);
-  cleanupReferencePreviews(card);
-  card.remove();
-  updateInterestRemoveButtons();
-  renderIncomeSummaryChips();
-  resetComputedEstimate();
-  scheduleSupportReview();
-  scheduleDraftSave();
-  focusElement(focusTarget);
-  announceUiStatus("Removed 1099-INT form.");
-}
-
-function removeSocialSecurity(card) {
-  const focusTarget = nextFocusTargetAfterRemoval(card, els.addSocialSecurityBtn);
-  cleanupReferencePreviews(card);
-  card.remove();
-  updateSocialSecurityRemoveButtons();
-  renderIncomeSummaryChips();
-  resetComputedEstimate();
-  scheduleSupportReview();
-  scheduleDraftSave();
-  focusElement(focusTarget);
-  announceUiStatus("Removed SSA-1099 form.");
-}
-
-function removeDividend(card) {
-  const focusTarget = nextFocusTargetAfterRemoval(card, els.addDividendBtn);
-  cleanupReferencePreviews(card);
-  card.remove();
-  updateDividendRemoveButtons();
-  renderIncomeSummaryChips();
-  resetComputedEstimate();
-  scheduleSupportReview();
-  scheduleDraftSave();
-  focusElement(focusTarget);
-  announceUiStatus("Removed 1099-DIV form.");
-}
-
-function removeDependent(card) {
-  const focusTarget = nextFocusTargetAfterRemoval(card, els.addDependentBtn);
-  card.remove();
-  updateDependentRemoveButtons();
-  resetComputedEstimate();
-  scheduleDraftSave();
-  focusElement(focusTarget);
-  announceUiStatus("Removed dependent.");
+  return {
+    card,
+    config: DYNAMIC_CARD_CONFIG_BY_TYPE[card.dataset.cardType] || null,
+  };
 }
 
 function setRemoveButtonsState(container, cardSelector, buttonSelector, disabled = false) {
@@ -3617,9 +3655,63 @@ function toggleTrace() {
   els.traceToggle.setAttribute("aria-expanded", String(open));
 }
 
+function handleAppClick(event) {
+  const button = event.target instanceof Element ? event.target.closest("button") : null;
+  if (!(button instanceof HTMLButtonElement) || !els.app.contains(button)) {
+    return;
+  }
+
+  if (button.classList.contains("ssn-toggle")) {
+    const field = button.closest(".ssn-field");
+    const input = field?.querySelector(".ssn-input");
+    if (!(input instanceof HTMLInputElement)) {
+      return;
+    }
+
+    const nextVisible = input.type === "password";
+    setSsnVisibility(input, button, nextVisible);
+    input.focus({ preventScroll: true });
+    input.setSelectionRange(input.value.length, input.value.length);
+    return;
+  }
+
+  const { card, config } = getDynamicCardContext(button);
+  if (!(card instanceof HTMLElement) || !config) {
+    return;
+  }
+
+  if (button.classList.contains("w2-advanced-toggle")) {
+    toggleAdvanced(card);
+    return;
+  }
+
+  if (button.classList.contains(config.clearButtonClass)) {
+    clearCardFields(card, config.clearOptions);
+    return;
+  }
+
+  if (button.classList.contains(config.removeButtonClass)) {
+    removeDynamicCard(card, config);
+  }
+}
+
 function handleAppFieldMutation(event) {
   if (!(event.target instanceof HTMLElement)) {
     return;
+  }
+
+  if (event.target instanceof HTMLInputElement && event.target.type === "file") {
+    return;
+  }
+
+  if (event.type === "input") {
+    if (event.target.classList.contains("ssn-input")) {
+      event.target.value = formatDigits(event.target.value, [3, 2, 4]);
+    }
+
+    if (event.target.classList.contains("w2-ein")) {
+      event.target.value = formatDigits(event.target.value, [2, 7]);
+    }
   }
 
   clearInlineErrorForControl(event.target);
@@ -3654,6 +3746,60 @@ function scheduleSupportReview() {
   }, 800);
 }
 
+function invalidatePayloadResult() {
+  state.lastBuiltPayloadResult = null;
+}
+
+function buildPayloadAndCache() {
+  const result = buildPayload();
+  state.lastBuiltPayloadResult = result;
+  return result;
+}
+
+function buildSupportReviewSnapshot({ payload, errors }) {
+  const blockingIssues = dedupeMessages(errors);
+
+  if (blockingIssues.length > 0) {
+    if (
+      blockingIssues.length === 1 &&
+      blockingIssues[0] === "Add at least one W-2, SSA-1099, 1099-INT, or 1099-DIV before calculating."
+    ) {
+      return normalizeSupportReviewSnapshot({
+        status: "pending",
+        readyForEstimate: false,
+        summary: SUPPORT_REVIEW_DEFAULT_SUMMARY,
+        blockingIssues: [],
+        cautions: [],
+      });
+    }
+
+    return normalizeSupportReviewSnapshot({
+      status: "attention",
+      readyForEstimate: false,
+      summary: "Finish the items below before calculating.",
+      blockingIssues,
+      cautions: [],
+    });
+  }
+
+  try {
+    const review = JSON.parse(review_tax_input(JSON.stringify(payload)));
+    if (!review || typeof review !== "object" || Array.isArray(review)) {
+      throw new Error("Support review returned an unexpected payload shape.");
+    }
+
+    return normalizeSupportReviewSnapshot(review);
+  } catch (error) {
+    return normalizeSupportReviewSnapshot({
+      status: "attention",
+      readyForEstimate: false,
+      summary: "TaxVault could not review this draft right now.",
+      blockingIssues: [`Support review error: ${safeMessage(error)}`],
+      cautions: [],
+    });
+  }
+}
+
 function refreshSupportReview() {
   if (state.currentStep !== 2) {
     return;
@@ -3664,46 +3810,12 @@ function refreshSupportReview() {
     return;
   }
 
-  const { payload, errors } = buildPayload();
-  const blockingIssues = dedupeMessages(errors);
-
-  if (blockingIssues.length > 0) {
-    if (
-      blockingIssues.length === 1 &&
-      blockingIssues[0] === "Add at least one W-2, SSA-1099, 1099-INT, or 1099-DIV before calculating."
-    ) {
-      renderSupportReviewPending(SUPPORT_REVIEW_DEFAULT_SUMMARY);
-      return;
-    }
-
-    renderSupportReview({
-      status: "attention",
-      summary: "Finish the items below before calculating.",
-      blocking_issues: blockingIssues,
-      cautions: [],
-    });
-    return;
-  }
-
-  try {
-    const review = JSON.parse(review_tax_input(JSON.stringify(payload)));
-    if (!review || typeof review !== "object" || Array.isArray(review)) {
-      throw new Error("Support review returned an unexpected payload shape.");
-    }
-
-    renderSupportReview(review);
-  } catch (error) {
-    renderSupportReview({
-      status: "attention",
-      summary: "TaxVault could not review this draft right now.",
-      blocking_issues: [`Support review error: ${safeMessage(error)}`],
-      cautions: [],
-    });
-  }
+  renderSupportReview(buildSupportReviewSnapshot(buildPayloadAndCache()));
 }
 
 function resetSupportReview() {
   window.clearTimeout(supportReviewTimer);
+  invalidatePayloadResult();
   renderSupportReviewPending(SUPPORT_REVIEW_DEFAULT_SUMMARY);
 }
 
@@ -3714,23 +3826,13 @@ function syncComputeButtonState() {
 }
 
 function renderSupportReviewPending(summary) {
-  const normalizedReview = normalizeSupportReviewSnapshot({
+  renderSupportReview({
     status: "pending",
     readyForEstimate: false,
     summary,
     blockingIssues: [],
     cautions: [],
   });
-
-  state.supportReviewReadyForEstimate = false;
-  state.lastSupportReview = normalizedReview;
-  els.supportReviewCard.dataset.status = "pending";
-  els.supportReviewSummary.textContent = normalizedReview.summary;
-  els.supportReviewBadge.className = "support-review-badge pending";
-  els.supportReviewBadge.textContent = "In Progress";
-  setSupportReviewItems(els.supportReviewIssuesSection, els.supportReviewIssues, []);
-  setSupportReviewItems(els.supportReviewCautionsSection, els.supportReviewCautions, []);
-  syncComputeButtonState();
 }
 
 function renderSupportReview(review) {
@@ -3739,6 +3841,7 @@ function renderSupportReview(review) {
 
   state.supportReviewReadyForEstimate = normalizedReview.readyForEstimate;
   state.lastSupportReview = normalizedReview;
+  state.supportReviewStale = false;
 
   els.supportReviewCard.dataset.status = status;
   els.supportReviewSummary.textContent = normalizedReview.summary;
@@ -3782,6 +3885,8 @@ function supportReviewBadgeLabel(status) {
   switch (status) {
     case "ready":
       return "Ready";
+    case "pending":
+      return "In Progress";
     case "unsupported":
       return "Unsupported";
     default:
@@ -3831,13 +3936,26 @@ function computeReturn() {
     return;
   }
 
-  const { payload, errors } = buildPayload();
+  window.clearTimeout(supportReviewTimer);
+  els.supportReviewCard.removeAttribute("aria-busy");
+
+  const payloadResult = state.lastBuiltPayloadResult || buildPayloadAndCache();
+  const { payload, errors } = payloadResult;
   if (errors.length > 0) {
     showError(errors);
     return;
   }
 
-  if (!state.supportReviewReadyForEstimate) {
+  const shouldRefreshSupportReview = state.supportReviewStale || !state.lastSupportReview;
+  const supportReview = shouldRefreshSupportReview
+    ? buildSupportReviewSnapshot(payloadResult)
+    : normalizeSupportReviewSnapshot(state.lastSupportReview);
+
+  if (shouldRefreshSupportReview) {
+    renderSupportReview(supportReview);
+  }
+
+  if (!supportReview.readyForEstimate) {
     showError("Support Review must show Ready before TaxVault can calculate this draft.");
     return;
   }
@@ -3845,7 +3963,6 @@ function computeReturn() {
   hideError();
   const originalLabel = els.computeBtn.textContent;
   const draftEnvelope = buildStoredDraftEnvelope(captureDraftSnapshot());
-  const supportReview = normalizeSupportReviewSnapshot(state.lastSupportReview);
   els.computeBtn.disabled = true;
   els.computeBtn.setAttribute("aria-disabled", "true");
   els.computeBtn.textContent = "Calculating...";
@@ -4094,264 +4211,299 @@ function collectDependents(errors, { requireAtLeastOne = false } = {}) {
   return dependents;
 }
 
-function collectInterestCards(errors) {
-  const interestIncome = [];
-  const cards = Array.from(els.interestContainer.querySelectorAll(".interest-card"));
+function collectIncomeCards(errors, collectConfig) {
+  const entries = [];
+  const cards = Array.from(collectConfig.container.querySelectorAll(collectConfig.cardSelector));
 
   cards.forEach((card, index) => {
-    const payerName = readTrimmedQueryValue(card, ".interest-payer");
-    const rawTaxable = readTrimmedQueryValue(card, ".interest-taxable");
-    const rawTaxExempt = readTrimmedQueryValue(card, ".interest-tax-exempt");
-    const label = `1099-INT #${index + 1}`;
-    const isBlank = payerName === "" && rawTaxable === "" && rawTaxExempt === "";
+    const snapshot = collectConfig.readSnapshot(card);
 
-    if (isBlank) {
+    if (collectConfig.isBlank(snapshot)) {
       return;
     }
 
+    const label = `${collectConfig.titleLabel} #${index + 1}`;
     const priorErrorCount = errors.length;
-    const taxableInterest = parseMoney(rawTaxable, 0);
-    const taxExemptInterest = parseMoney(rawTaxExempt, 0);
-
-    if (!Number.isFinite(taxableInterest) || taxableInterest < 0) {
-      errors.push(`${label}: taxable interest must be 0 or greater.`);
-    }
-    if (!Number.isFinite(taxExemptInterest) || taxExemptInterest < 0) {
-      errors.push(`${label}: tax-exempt interest must be 0 or greater.`);
-    }
-    if (
-      Number.isFinite(taxableInterest) &&
-      Number.isFinite(taxExemptInterest) &&
-      taxableInterest === 0 &&
-      taxExemptInterest === 0
-    ) {
-      errors.push(`${label}: enter taxable interest, tax-exempt interest, or remove the card.`);
-    }
+    collectConfig.validateSnapshot(snapshot, label, errors);
 
     if (errors.length > priorErrorCount) {
       return;
     }
 
-    interestIncome.push({
-      recipient: readQueryValue(card, ".interest-recipient"),
-      payer_name: payerName,
-      taxable_interest: taxableInterest,
-      tax_exempt_interest: taxExemptInterest,
-    });
+    entries.push(collectConfig.buildEntry(snapshot));
   });
 
-  return interestIncome;
+  return entries;
+}
+
+function readInterestCardSnapshot(card) {
+  return {
+    payerName: readTrimmedQueryValue(card, ".interest-payer"),
+    recipient: readQueryValue(card, ".interest-recipient"),
+    rawTaxable: readTrimmedQueryValue(card, ".interest-taxable"),
+    rawTaxExempt: readTrimmedQueryValue(card, ".interest-tax-exempt"),
+  };
+}
+
+function validateInterestCardSnapshot(snapshot, label, errors) {
+  snapshot.taxableInterest = parseMoney(snapshot.rawTaxable, 0);
+  snapshot.taxExemptInterest = parseMoney(snapshot.rawTaxExempt, 0);
+
+  if (!Number.isFinite(snapshot.taxableInterest) || snapshot.taxableInterest < 0) {
+    errors.push(`${label}: taxable interest must be 0 or greater.`);
+  }
+  if (!Number.isFinite(snapshot.taxExemptInterest) || snapshot.taxExemptInterest < 0) {
+    errors.push(`${label}: tax-exempt interest must be 0 or greater.`);
+  }
+  if (
+    Number.isFinite(snapshot.taxableInterest) &&
+    Number.isFinite(snapshot.taxExemptInterest) &&
+    snapshot.taxableInterest === 0 &&
+    snapshot.taxExemptInterest === 0
+  ) {
+    errors.push(`${label}: enter taxable interest, tax-exempt interest, or remove the card.`);
+  }
+}
+
+function buildInterestCardEntry(snapshot) {
+  return {
+    recipient: snapshot.recipient,
+    payer_name: snapshot.payerName,
+    taxable_interest: snapshot.taxableInterest,
+    tax_exempt_interest: snapshot.taxExemptInterest,
+  };
+}
+
+function collectInterestCards(errors) {
+  return collectIncomeCards(errors, {
+    container: els.interestContainer,
+    cardSelector: ".interest-card",
+    titleLabel: "1099-INT",
+    readSnapshot: readInterestCardSnapshot,
+    isBlank: (snapshot) =>
+      snapshot.payerName === "" && snapshot.rawTaxable === "" && snapshot.rawTaxExempt === "",
+    validateSnapshot: validateInterestCardSnapshot,
+    buildEntry: buildInterestCardEntry,
+  });
+}
+
+function readSocialSecurityCardSnapshot(card) {
+  return {
+    recipient: readQueryValue(card, ".ssa-recipient"),
+    rawBenefits: readTrimmedQueryValue(card, ".ssa-benefits"),
+    rawWithholding: readTrimmedQueryValue(card, ".ssa-withholding"),
+  };
+}
+
+function validateSocialSecurityCardSnapshot(snapshot, label, errors) {
+  snapshot.totalBenefits = parseMoney(snapshot.rawBenefits);
+  snapshot.voluntaryWithholding = parseMoney(snapshot.rawWithholding, 0);
+
+  if (!Number.isFinite(snapshot.totalBenefits) || snapshot.totalBenefits <= 0) {
+    errors.push(`${label}: total benefits must be greater than 0.`);
+  }
+  if (!Number.isFinite(snapshot.voluntaryWithholding) || snapshot.voluntaryWithholding < 0) {
+    errors.push(`${label}: voluntary federal tax withheld must be 0 or greater.`);
+  }
+  if (
+    Number.isFinite(snapshot.totalBenefits) &&
+    Number.isFinite(snapshot.voluntaryWithholding) &&
+    snapshot.voluntaryWithholding > snapshot.totalBenefits
+  ) {
+    errors.push(`${label}: voluntary withholding cannot exceed total benefits.`);
+  }
+}
+
+function buildSocialSecurityCardEntry(snapshot) {
+  return {
+    recipient: snapshot.recipient,
+    total_benefits: snapshot.totalBenefits,
+    voluntary_withholding: snapshot.voluntaryWithholding,
+  };
 }
 
 function collectSocialSecurityCards(errors) {
-  const socialSecurityIncome = [];
-  const cards = Array.from(els.socialSecurityContainer.querySelectorAll(".ssa-card"));
-
-  cards.forEach((card, index) => {
-    const rawBenefits = readTrimmedQueryValue(card, ".ssa-benefits");
-    const rawWithholding = readTrimmedQueryValue(card, ".ssa-withholding");
-    const label = `SSA-1099 #${index + 1}`;
-    const isBlank = rawBenefits === "" && rawWithholding === "";
-
-    if (isBlank) {
-      return;
-    }
-
-    const priorErrorCount = errors.length;
-    const totalBenefits = parseMoney(rawBenefits);
-    const voluntaryWithholding = parseMoney(rawWithholding, 0);
-
-    if (!Number.isFinite(totalBenefits) || totalBenefits <= 0) {
-      errors.push(`${label}: total benefits must be greater than 0.`);
-    }
-    if (!Number.isFinite(voluntaryWithholding) || voluntaryWithholding < 0) {
-      errors.push(`${label}: voluntary federal tax withheld must be 0 or greater.`);
-    }
-    if (
-      Number.isFinite(totalBenefits) &&
-      Number.isFinite(voluntaryWithholding) &&
-      voluntaryWithholding > totalBenefits
-    ) {
-      errors.push(`${label}: voluntary withholding cannot exceed total benefits.`);
-    }
-
-    if (errors.length > priorErrorCount) {
-      return;
-    }
-
-    socialSecurityIncome.push({
-      recipient: readQueryValue(card, ".ssa-recipient"),
-      total_benefits: totalBenefits,
-      voluntary_withholding: voluntaryWithholding,
-    });
+  return collectIncomeCards(errors, {
+    container: els.socialSecurityContainer,
+    cardSelector: ".ssa-card",
+    titleLabel: "SSA-1099",
+    readSnapshot: readSocialSecurityCardSnapshot,
+    isBlank: (snapshot) => snapshot.rawBenefits === "" && snapshot.rawWithholding === "",
+    validateSnapshot: validateSocialSecurityCardSnapshot,
+    buildEntry: buildSocialSecurityCardEntry,
   });
+}
 
-  return socialSecurityIncome;
+function readDividendCardSnapshot(card) {
+  return {
+    payerName: readTrimmedQueryValue(card, ".dividend-payer"),
+    recipient: readQueryValue(card, ".dividend-recipient"),
+    rawOrdinary: readTrimmedQueryValue(card, ".dividend-ordinary"),
+    rawQualified: readTrimmedQueryValue(card, ".dividend-qualified"),
+  };
+}
+
+function validateDividendCardSnapshot(snapshot, label, errors) {
+  snapshot.ordinaryDividends = parseMoney(snapshot.rawOrdinary, 0);
+  snapshot.qualifiedDividends = parseMoney(snapshot.rawQualified, 0);
+
+  if (!Number.isFinite(snapshot.ordinaryDividends) || snapshot.ordinaryDividends < 0) {
+    errors.push(`${label}: ordinary dividends must be 0 or greater.`);
+  }
+  if (!Number.isFinite(snapshot.qualifiedDividends) || snapshot.qualifiedDividends < 0) {
+    errors.push(`${label}: qualified dividends must be 0 or greater.`);
+  }
+  if (
+    Number.isFinite(snapshot.ordinaryDividends) &&
+    Number.isFinite(snapshot.qualifiedDividends) &&
+    snapshot.ordinaryDividends === 0 &&
+    snapshot.qualifiedDividends === 0
+  ) {
+    errors.push(`${label}: enter ordinary dividends, qualified dividends, or remove the card.`);
+  }
+  if (
+    Number.isFinite(snapshot.ordinaryDividends) &&
+    Number.isFinite(snapshot.qualifiedDividends) &&
+    snapshot.qualifiedDividends > snapshot.ordinaryDividends
+  ) {
+    errors.push(`${label}: qualified dividends cannot exceed ordinary dividends.`);
+  }
+}
+
+function buildDividendCardEntry(snapshot) {
+  return {
+    recipient: snapshot.recipient,
+    payer_name: snapshot.payerName,
+    ordinary_dividends: snapshot.ordinaryDividends,
+    qualified_dividends: snapshot.qualifiedDividends,
+  };
 }
 
 function collectDividendCards(errors) {
-  const dividendIncome = [];
-  const cards = Array.from(els.dividendContainer.querySelectorAll(".dividend-card"));
+  return collectIncomeCards(errors, {
+    container: els.dividendContainer,
+    cardSelector: ".dividend-card",
+    titleLabel: "1099-DIV",
+    readSnapshot: readDividendCardSnapshot,
+    isBlank: (snapshot) =>
+      snapshot.payerName === "" && snapshot.rawOrdinary === "" && snapshot.rawQualified === "",
+    validateSnapshot: validateDividendCardSnapshot,
+    buildEntry: buildDividendCardEntry,
+  });
+}
 
-  cards.forEach((card, index) => {
-    const payerName = readTrimmedQueryValue(card, ".dividend-payer");
-    const rawOrdinary = readTrimmedQueryValue(card, ".dividend-ordinary");
-    const rawQualified = readTrimmedQueryValue(card, ".dividend-qualified");
-    const label = `1099-DIV #${index + 1}`;
-    const isBlank = payerName === "" && rawOrdinary === "" && rawQualified === "";
+function readW2CardSnapshot(card) {
+  return {
+    recipient: readQueryValue(card, ".w2-recipient"),
+    employerName: readTrimmedQueryValue(card, ".w2-employer"),
+    employerEin: readTrimmedQueryValue(card, ".w2-ein"),
+    rawWages: readTrimmedQueryValue(card, ".w2-wages"),
+    rawFedWh: readTrimmedQueryValue(card, ".w2-fed-wh"),
+    rawStateWh: readTrimmedQueryValue(card, ".w2-state-wh"),
+    rawSsWages: readTrimmedQueryValue(card, ".w2-ss-wages"),
+    rawSsWh: readTrimmedQueryValue(card, ".w2-ss-wh"),
+    rawMedWages: readTrimmedQueryValue(card, ".w2-med-wages"),
+    rawMedWh: readTrimmedQueryValue(card, ".w2-med-wh"),
+  };
+}
 
-    if (isBlank) {
-      return;
-    }
+function validateW2CardSnapshot(snapshot, label, errors) {
+  if (!snapshot.employerName) {
+    errors.push(`${label}: employer name is required.`);
+  }
 
-    const priorErrorCount = errors.length;
-    const ordinaryDividends = parseMoney(rawOrdinary, 0);
-    const qualifiedDividends = parseMoney(rawQualified, 0);
+  if (!snapshot.employerEin) {
+    errors.push(`${label}: employer EIN is required.`);
+  } else if (!EIN_PATTERN.test(snapshot.employerEin)) {
+    errors.push(`${label}: employer EIN must use the format 12-3456789.`);
+  }
 
-    if (!Number.isFinite(ordinaryDividends) || ordinaryDividends < 0) {
-      errors.push(`${label}: ordinary dividends must be 0 or greater.`);
-    }
-    if (!Number.isFinite(qualifiedDividends) || qualifiedDividends < 0) {
-      errors.push(`${label}: qualified dividends must be 0 or greater.`);
-    }
-    if (
-      Number.isFinite(ordinaryDividends) &&
-      Number.isFinite(qualifiedDividends) &&
-      ordinaryDividends === 0 &&
-      qualifiedDividends === 0
-    ) {
-      errors.push(`${label}: enter ordinary dividends, qualified dividends, or remove the card.`);
-    }
-    if (
-      Number.isFinite(ordinaryDividends) &&
-      Number.isFinite(qualifiedDividends) &&
-      qualifiedDividends > ordinaryDividends
-    ) {
-      errors.push(`${label}: qualified dividends cannot exceed ordinary dividends.`);
-    }
+  snapshot.wages = parseMoney(snapshot.rawWages);
+  snapshot.federalTaxWithheld = parseMoney(snapshot.rawFedWh, 0);
+  snapshot.stateTaxWithheld = parseMoney(snapshot.rawStateWh, 0);
+  snapshot.socialSecurityWages =
+    snapshot.rawSsWages === "" ? snapshot.wages : parseMoney(snapshot.rawSsWages);
+  snapshot.socialSecurityTaxWithheld = parseMoney(snapshot.rawSsWh, 0);
+  snapshot.medicareWages =
+    snapshot.rawMedWages === "" ? snapshot.wages : parseMoney(snapshot.rawMedWages);
+  snapshot.medicareTaxWithheld = parseMoney(snapshot.rawMedWh, 0);
 
-    if (errors.length > priorErrorCount) {
-      return;
-    }
+  if (!Number.isFinite(snapshot.wages) || snapshot.wages <= 0) {
+    errors.push(`${label}: wages must be greater than 0.`);
+  }
 
-    dividendIncome.push({
-      recipient: readQueryValue(card, ".dividend-recipient"),
-      payer_name: payerName,
-      ordinary_dividends: ordinaryDividends,
-      qualified_dividends: qualifiedDividends,
-    });
+  [
+    ["federal withholding", snapshot.federalTaxWithheld],
+    ["state withholding", snapshot.stateTaxWithheld],
+    ["Social Security wages", snapshot.socialSecurityWages],
+    ["Social Security withholding", snapshot.socialSecurityTaxWithheld],
+    ["Medicare wages", snapshot.medicareWages],
+    ["Medicare withholding", snapshot.medicareTaxWithheld],
+  ].forEach(([fieldLabel, value]) => {
+    if (!Number.isFinite(value) || value < 0) {
+      errors.push(`${label}: ${fieldLabel} must be 0 or greater.`);
+    }
   });
 
-  return dividendIncome;
+  if (
+    Number.isFinite(snapshot.federalTaxWithheld) &&
+    Number.isFinite(snapshot.wages) &&
+    snapshot.federalTaxWithheld > snapshot.wages
+  ) {
+    errors.push(`${label}: federal withholding cannot exceed wages.`);
+  }
+
+  if (
+    Number.isFinite(snapshot.socialSecurityTaxWithheld) &&
+    Number.isFinite(snapshot.socialSecurityWages) &&
+    snapshot.socialSecurityTaxWithheld > snapshot.socialSecurityWages
+  ) {
+    errors.push(`${label}: Social Security withholding cannot exceed Social Security wages.`);
+  }
+
+  if (
+    Number.isFinite(snapshot.medicareTaxWithheld) &&
+    Number.isFinite(snapshot.medicareWages) &&
+    snapshot.medicareTaxWithheld > snapshot.medicareWages
+  ) {
+    errors.push(`${label}: Medicare withholding cannot exceed Medicare wages.`);
+  }
+}
+
+function buildW2CardEntry(snapshot) {
+  return {
+    recipient: snapshot.recipient,
+    employer_name: snapshot.employerName,
+    employer_ein: snapshot.employerEin,
+    wages: snapshot.wages,
+    federal_tax_withheld: snapshot.federalTaxWithheld,
+    state_tax_withheld: snapshot.stateTaxWithheld,
+    social_security_wages: snapshot.socialSecurityWages,
+    social_security_tax_withheld: snapshot.socialSecurityTaxWithheld,
+    medicare_wages: snapshot.medicareWages,
+    medicare_tax_withheld: snapshot.medicareTaxWithheld,
+  };
 }
 
 function collectW2Cards(errors) {
-  const w2s = [];
-  const cards = Array.from(els.w2Container.querySelectorAll(".w2-card"));
-
-  cards.forEach((card, index) => {
-    const employerName = readTrimmedQueryValue(card, ".w2-employer");
-    const employerEin = readTrimmedQueryValue(card, ".w2-ein");
-    const rawWages = readTrimmedQueryValue(card, ".w2-wages");
-    const rawFedWh = readTrimmedQueryValue(card, ".w2-fed-wh");
-    const rawStateWh = readTrimmedQueryValue(card, ".w2-state-wh");
-    const rawSsWages = readTrimmedQueryValue(card, ".w2-ss-wages");
-    const rawSsWh = readTrimmedQueryValue(card, ".w2-ss-wh");
-    const rawMedWages = readTrimmedQueryValue(card, ".w2-med-wages");
-    const rawMedWh = readTrimmedQueryValue(card, ".w2-med-wh");
-    const label = `W-2 #${index + 1}`;
-
-    const isBlank =
-      employerName === "" &&
-      employerEin === "" &&
-      rawWages === "" &&
-      rawFedWh === "" &&
-      rawStateWh === "" &&
-      rawSsWages === "" &&
-      rawSsWh === "" &&
-      rawMedWages === "" &&
-      rawMedWh === "";
-
-    if (isBlank) {
-      return;
-    }
-
-    const priorErrorCount = errors.length;
-
-    if (!employerName) {
-      errors.push(`${label}: employer name is required.`);
-    }
-
-    if (!employerEin) {
-      errors.push(`${label}: employer EIN is required.`);
-    } else if (!EIN_PATTERN.test(employerEin)) {
-      errors.push(`${label}: employer EIN must use the format 12-3456789.`);
-    }
-
-    const wages = parseMoney(rawWages);
-    const federalTaxWithheld = parseMoney(rawFedWh, 0);
-    const stateTaxWithheld = parseMoney(rawStateWh, 0);
-    const socialSecurityWages = rawSsWages === "" ? wages : parseMoney(rawSsWages);
-    const socialSecurityTaxWithheld = parseMoney(rawSsWh, 0);
-    const medicareWages = rawMedWages === "" ? wages : parseMoney(rawMedWages);
-    const medicareTaxWithheld = parseMoney(rawMedWh, 0);
-
-    if (!Number.isFinite(wages) || wages <= 0) {
-      errors.push(`${label}: wages must be greater than 0.`);
-    }
-
-    [
-      ["federal withholding", federalTaxWithheld],
-      ["state withholding", stateTaxWithheld],
-      ["Social Security wages", socialSecurityWages],
-      ["Social Security withholding", socialSecurityTaxWithheld],
-      ["Medicare wages", medicareWages],
-      ["Medicare withholding", medicareTaxWithheld],
-    ].forEach(([fieldLabel, value]) => {
-      if (!Number.isFinite(value) || value < 0) {
-        errors.push(`${label}: ${fieldLabel} must be 0 or greater.`);
-      }
-    });
-
-    if (Number.isFinite(federalTaxWithheld) && Number.isFinite(wages) && federalTaxWithheld > wages) {
-      errors.push(`${label}: federal withholding cannot exceed wages.`);
-    }
-
-    if (
-      Number.isFinite(socialSecurityTaxWithheld) &&
-      Number.isFinite(socialSecurityWages) &&
-      socialSecurityTaxWithheld > socialSecurityWages
-    ) {
-      errors.push(`${label}: Social Security withholding cannot exceed Social Security wages.`);
-    }
-
-    if (
-      Number.isFinite(medicareTaxWithheld) &&
-      Number.isFinite(medicareWages) &&
-      medicareTaxWithheld > medicareWages
-    ) {
-      errors.push(`${label}: Medicare withholding cannot exceed Medicare wages.`);
-    }
-
-    if (errors.length > priorErrorCount) {
-      return;
-    }
-
-    w2s.push({
-      recipient: readQueryValue(card, ".w2-recipient"),
-      employer_name: employerName,
-      employer_ein: employerEin,
-      wages,
-      federal_tax_withheld: federalTaxWithheld,
-      state_tax_withheld: stateTaxWithheld,
-      social_security_wages: socialSecurityWages,
-      social_security_tax_withheld: socialSecurityTaxWithheld,
-      medicare_wages: medicareWages,
-      medicare_tax_withheld: medicareTaxWithheld,
-    });
+  return collectIncomeCards(errors, {
+    container: els.w2Container,
+    cardSelector: ".w2-card",
+    titleLabel: "W-2",
+    readSnapshot: readW2CardSnapshot,
+    isBlank: (snapshot) =>
+      snapshot.employerName === "" &&
+      snapshot.employerEin === "" &&
+      snapshot.rawWages === "" &&
+      snapshot.rawFedWh === "" &&
+      snapshot.rawStateWh === "" &&
+      snapshot.rawSsWages === "" &&
+      snapshot.rawSsWh === "" &&
+      snapshot.rawMedWages === "" &&
+      snapshot.rawMedWh === "",
+    validateSnapshot: validateW2CardSnapshot,
+    buildEntry: buildW2CardEntry,
   });
-
-  return w2s;
 }
 
 function renderResults(data, { draftEnvelope = null, supportReview = null } = {}) {
@@ -4706,6 +4858,9 @@ function resetDraftPreview() {
 }
 
 function resetComputedEstimate() {
+  invalidatePayloadResult();
+  state.supportReviewStale = state.currentStep === 2;
+
   if (
     !state.lastComputedResult &&
     !state.lastComputedDraftEnvelope &&
@@ -5145,394 +5300,21 @@ function sortedLineKeys(lines) {
   });
 }
 
-function renderReviewPacketList(items) {
-  if (!Array.isArray(items) || items.length === 0) {
-    return '<p class="empty-state">None.</p>';
-  }
-
-  return `<ul>${items.map((item) => `<li>${escapeHtml(item)}</li>`).join("")}</ul>`;
-}
-
-function renderReviewPacketTable(headers, rows) {
-  if (!Array.isArray(rows) || rows.length === 0) {
-    return '<p class="empty-state">None.</p>';
-  }
-
-  const thead = `<thead><tr>${headers
-    .map((header) => `<th>${escapeHtml(header)}</th>`)
-    .join("")}</tr></thead>`;
-  const tbody = `<tbody>${rows
-    .map(
-      (row) =>
-        `<tr>${row
-          .map((cell) => `<td>${escapeHtml(cell)}</td>`)
-          .join("")}</tr>`
-    )
-    .join("")}</tbody>`;
-
-  return `<table>${thead}${tbody}</table>`;
-}
-
 function buildReviewPacketHtml(envelope) {
-  if (!isPlainObject(envelope)) {
-    return "";
-  }
-
-  const draft = envelope.draftEnvelope?.draft || {};
-  const supportReview = envelope.supportReview || null;
-  const estimate = envelope.estimate || {};
-  const summary = estimate.summary || {};
-  const meta = estimate.meta || {};
-  const form = estimate.form || {};
-  const lines = form.lines || {};
-  const breakdownRows = Array.isArray(estimate.breakdown) ? estimate.breakdown : [];
-  const headline = summarizeEstimateHeadline(summary);
-  const primaryName = formatDraftPerson(draft.primaryFiler);
-  const spouseName = formatDraftPerson(draft.spouse);
-
-  const summaryCards = [
-    ["Tax Year", String(envelope.taxYear || "Unavailable")],
-    ["Filing Status", formatFilingStatusLabel(summary.filing_status || draft.filingStatus)],
-    ["Primary Filer", primaryName],
-    ["Spouse", spouseName],
-    ["Generated", formatReviewPacketTimestamp(envelope.exportedAt)],
-    [
-      "Rule Pack",
-      meta.rule_pack_version ? `Federal rules ${meta.rule_pack_version}` : "Unavailable",
-    ],
-  ];
-
-  const inputRows = [
-    ["W-2 forms", String(Array.isArray(draft.w2s) ? draft.w2s.length : 0)],
-    ["SSA-1099 forms", String(Array.isArray(draft.socialSecurityIncome) ? draft.socialSecurityIncome.length : 0)],
-    ["1099-INT forms", String(Array.isArray(draft.interestIncome) ? draft.interestIncome.length : 0)],
-    ["1099-DIV forms", String(Array.isArray(draft.dividendIncome) ? draft.dividendIncome.length : 0)],
-    ["Dependents", String(Array.isArray(draft.dependents) ? draft.dependents.length : 0)],
-    [
-      "Adjustments/payments entered",
-      [
-        draft.adjustments?.traditionalIraDeduction,
-        draft.adjustments?.hsaDeduction,
-        draft.adjustments?.studentLoanInterestPaid,
-        draft.estimatedTaxPayments,
-      ]
-        .filter((value) => String(value || "").trim() !== "")
-        .length > 0
-        ? "Yes"
-        : "No",
-    ],
-  ];
-
-  const adjustmentRows = [
-    ["Traditional IRA Deduction", draft.adjustments?.traditionalIraDeduction || "0"],
-    ["HSA Deduction", draft.adjustments?.hsaDeduction || "0"],
-    ["Student Loan Interest Paid", draft.adjustments?.studentLoanInterestPaid || "0"],
-    ["Estimated Tax Payments", draft.estimatedTaxPayments || "0"],
-  ];
-
-  const dependentRows = Array.isArray(draft.dependents)
-    ? draft.dependents.map((dependent) => [
-        [dependent.firstName, dependent.lastName].filter(Boolean).join(" ").trim() || "Not entered",
-        dependent.dob || "Not entered",
-        formatDependentRelationshipLabel(dependent.relationship),
-        dependent.monthsLivedInHome || "0",
-      ])
-    : [];
-
-  const w2Rows = Array.isArray(draft.w2s)
-    ? draft.w2s.map((w2) => [
-        w2.employerName || "Employer not entered",
-        formatIncomeRecipientLabel(w2.recipient),
-        w2.wages || "0",
-        w2.federalTaxWithheld || "0",
-      ])
-    : [];
-
-  const interestRows = Array.isArray(draft.interestIncome)
-    ? draft.interestIncome.map((item) => [
-        item.payerName || "Institution not entered",
-        formatIncomeRecipientLabel(item.recipient),
-        item.taxableInterest || "0",
-        item.taxExemptInterest || "0",
-      ])
-    : [];
-
-  const dividendRows = Array.isArray(draft.dividendIncome)
-    ? draft.dividendIncome.map((item) => [
-        item.payerName || "Institution not entered",
-        formatIncomeRecipientLabel(item.recipient),
-        item.ordinaryDividends || "0",
-        item.qualifiedDividends || "0",
-      ])
-    : [];
-
-  const socialSecurityRows = Array.isArray(draft.socialSecurityIncome)
-    ? draft.socialSecurityIncome.map((item) => [
-        formatIncomeRecipientLabel(item.recipient),
-        item.totalBenefits || "0",
-        item.voluntaryWithholding || "0",
-      ])
-    : [];
-
-  const breakdownTableRows = breakdownRows
-    .filter((row) => row && !row.section)
-    .map((row) => [row.label || "Unlabeled row", row.formattedValue || "0.00"]);
-
-  const lineRows = sortedLineKeys(lines).map((line) => [
-    `Line ${line}`,
-    formatLineValue(lines[line]),
-  ]);
-
-  return `<!DOCTYPE html>
-<html lang="en">
-<head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>TaxVault Review Packet</title>
-<style>
-  :root {
-    color-scheme: light;
-    --ink: #0f172a;
-    --muted: #475569;
-    --line: #cbd5e1;
-    --panel: #ffffff;
-    --soft: #f8fafc;
-    --accent: #0f766e;
-    --warning: #b45309;
-    --danger: #b91c1c;
-  }
-  * { box-sizing: border-box; }
-  body {
-    margin: 0;
-    padding: 2rem;
-    font-family: "Iowan Old Style", "Palatino Linotype", "Book Antiqua", Georgia, serif;
-    color: var(--ink);
-    background: linear-gradient(180deg, #f8fafc 0%, #eef2ff 100%);
-  }
-  main {
-    max-width: 960px;
-    margin: 0 auto;
-  }
-  .hero, section {
-    background: rgba(255, 255, 255, 0.96);
-    border: 1px solid rgba(148, 163, 184, 0.28);
-    border-radius: 18px;
-    padding: 1.4rem 1.5rem;
-    box-shadow: 0 12px 30px rgba(15, 23, 42, 0.06);
-    margin-bottom: 1rem;
-  }
-  .eyebrow {
-    font: 700 0.78rem/1.2 "IBM Plex Sans", "Avenir Next", Helvetica, sans-serif;
-    letter-spacing: 0.12em;
-    text-transform: uppercase;
-    color: var(--accent);
-  }
-  h1, h2, h3 {
-    margin: 0;
-    line-height: 1.1;
-  }
-  h1 { font-size: 2.2rem; margin-top: 0.35rem; }
-  h2 { font-size: 1.15rem; margin-bottom: 0.9rem; }
-  p, li, td, th, div { font-size: 0.98rem; }
-  .hero-note, .muted, .empty-state { color: var(--muted); }
-  .amount {
-    margin: 0.6rem 0 0.35rem;
-    font-size: 2.1rem;
-    font-weight: 700;
-    color: var(--accent);
-  }
-  .grid {
-    display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
-    gap: 0.8rem;
-  }
-  .card {
-    background: var(--soft);
-    border: 1px solid var(--line);
-    border-radius: 14px;
-    padding: 0.9rem 1rem;
-  }
-  .label {
-    font: 700 0.75rem/1.2 "IBM Plex Sans", "Avenir Next", Helvetica, sans-serif;
-    letter-spacing: 0.08em;
-    text-transform: uppercase;
-    color: var(--muted);
-    margin-bottom: 0.35rem;
-  }
-  ul {
-    margin: 0.45rem 0 0;
-    padding-left: 1.15rem;
-  }
-  table {
-    width: 100%;
-    border-collapse: collapse;
-    font-size: 0.94rem;
-  }
-  th, td {
-    text-align: left;
-    padding: 0.55rem 0.45rem;
-    border-bottom: 1px solid var(--line);
-    vertical-align: top;
-  }
-  th {
-    font: 700 0.78rem/1.2 "IBM Plex Sans", "Avenir Next", Helvetica, sans-serif;
-    letter-spacing: 0.08em;
-    text-transform: uppercase;
-    color: var(--muted);
-  }
-  .section-grid {
-    display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
-    gap: 1rem;
-  }
-  .status-pill {
-    display: inline-block;
-    padding: 0.28rem 0.6rem;
-    border-radius: 999px;
-    background: #ecfeff;
-    border: 1px solid #99f6e4;
-    color: #115e59;
-    font: 700 0.8rem/1 "IBM Plex Sans", "Avenir Next", Helvetica, sans-serif;
-    text-transform: uppercase;
-    letter-spacing: 0.08em;
-  }
-  pre {
-    margin: 0;
-    padding: 1rem;
-    background: #0f172a;
-    color: #e2e8f0;
-    border-radius: 14px;
-    overflow: auto;
-    white-space: pre-wrap;
-    word-break: break-word;
-    font: 0.84rem/1.45 "SFMono-Regular", Menlo, Consolas, monospace;
-  }
-  @media print {
-    body {
-      background: #fff;
-      padding: 0;
-    }
-    .hero, section {
-      box-shadow: none;
-      break-inside: avoid;
-    }
-  }
-</style>
-</head>
-<body>
-<main>
-  <section class="hero">
-    <div class="eyebrow">TaxVault Review Packet</div>
-    <h1>${escapeHtml(headline.label)}</h1>
-    <div class="amount">${escapeHtml(headline.amount)}</div>
-    <p class="hero-note">${escapeHtml(headline.note)}</p>
-    <p class="muted">Generated locally on ${escapeHtml(formatReviewPacketTimestamp(envelope.exportedAt))}. This packet is for review only and is not a filing-ready return.</p>
-  </section>
-
-  <section>
-    <h2>Estimate Summary</h2>
-    <div class="grid">
-      ${summaryCards
-        .map(
-          ([label, value]) => `<div class="card"><div class="label">${escapeHtml(label)}</div><div>${escapeHtml(value)}</div></div>`
-        )
-        .join("")}
-    </div>
-  </section>
-
-  <section>
-    <h2>Estimate Readiness</h2>
-    <div class="section-grid">
-      <div class="card">
-        <div class="label">Status</div>
-        <div class="status-pill">${escapeHtml(
-          supportReview ? supportReviewBadgeLabel(supportReview.status) : "Unavailable"
-        )}</div>
-        <p>${escapeHtml(supportReview?.summary || "TaxVault did not capture a support review summary for this export.")}</p>
-      </div>
-      <div class="card">
-        <div class="label">Blocking Issues</div>
-        ${renderReviewPacketList(supportReview?.blockingIssues)}
-      </div>
-      <div class="card">
-        <div class="label">Cautions</div>
-        ${renderReviewPacketList(supportReview?.cautions)}
-      </div>
-    </div>
-  </section>
-
-  <section>
-    <h2>Scope and Metadata</h2>
-    ${renderReviewPacketTable(
-      ["Field", "Value"],
-      [
-        ["Estimate Scope", meta.estimate_scope || "Unavailable"],
-        ["Tax Table Status", meta ? formatTaxTableStatus(meta) : "Unavailable"],
-        ["Rule Pack", meta.rule_pack_version ? `Federal rules version ${meta.rule_pack_version}` : "Unavailable"],
-        ["Privacy", meta.privacy || "Unavailable"],
-      ]
-    )}
-    <div class="card" style="margin-top: 0.9rem;">
-      <div class="label">Scope Limits</div>
-      ${renderReviewPacketList(meta.scope_limits)}
-    </div>
-  </section>
-
-  <section>
-    <h2>Entered Inputs</h2>
-    <div class="section-grid">
-      <div class="card">
-        <div class="label">Input Counts</div>
-        ${renderReviewPacketTable(["Field", "Value"], inputRows)}
-      </div>
-      <div class="card">
-        <div class="label">Adjustments &amp; Payments</div>
-        ${renderReviewPacketTable(["Entry", "Entered Amount"], adjustmentRows)}
-      </div>
-    </div>
-    <div class="section-grid" style="margin-top: 1rem;">
-      <div class="card">
-        <div class="label">Dependents</div>
-        ${renderReviewPacketTable(["Name", "DOB", "Relationship", "Months in Home"], dependentRows)}
-      </div>
-      <div class="card">
-        <div class="label">W-2 Forms</div>
-        ${renderReviewPacketTable(["Employer", "Recipient", "Wages", "Federal Withholding"], w2Rows)}
-      </div>
-    </div>
-    <div class="section-grid" style="margin-top: 1rem;">
-      <div class="card">
-        <div class="label">1099-INT Forms</div>
-        ${renderReviewPacketTable(["Institution", "Recipient", "Taxable Interest", "Tax-Exempt Interest"], interestRows)}
-      </div>
-      <div class="card">
-        <div class="label">1099-DIV Forms</div>
-        ${renderReviewPacketTable(["Institution", "Recipient", "Ordinary Dividends", "Qualified Dividends"], dividendRows)}
-      </div>
-    </div>
-    <div class="card" style="margin-top: 1rem;">
-      <div class="label">SSA-1099 Forms</div>
-      ${renderReviewPacketTable(["Recipient", "Total Benefits", "Voluntary Withholding"], socialSecurityRows)}
-    </div>
-  </section>
-
-  <section>
-    <h2>Tax Breakdown</h2>
-    ${renderReviewPacketTable(["Line Item", "Amount"], breakdownTableRows)}
-  </section>
-
-  <section>
-    <h2>Draft Form 1040 Lines</h2>
-    ${renderReviewPacketTable(["Form Line", "Value"], lineRows)}
-  </section>
-
-  <section>
-    <h2>Calculation Trace</h2>
-    <pre>${escapeHtml(estimate.trace || "Trace unavailable.")}</pre>
-  </section>
-</main>
-</body>
-</html>`;
+  return buildReviewPacketDocumentHtml(envelope, {
+    escapeHtml,
+    formatDependentRelationshipLabel,
+    formatDraftPerson,
+    formatFilingStatusLabel,
+    formatIncomeRecipientLabel,
+    formatLineValue,
+    formatReviewPacketTimestamp,
+    formatTaxTableStatus,
+    isPlainObject,
+    sortedLineKeys,
+    summarizeEstimateHeadline,
+    supportReviewBadgeLabel,
+  });
 }
 
 function syncResultExportButtons() {
@@ -5695,52 +5477,8 @@ function clearAllData() {
   window.clearTimeout(draftSaveTimer);
   hideError();
   resetSupportReview();
-  resetComputedEstimate();
   cleanupReferencePreviews(els.app);
-  document.getElementById("pFirst").value = "";
-  document.getElementById("pLast").value = "";
-  document.getElementById("pSsn").value = "";
-  document.getElementById("pDob").value = "";
-  document.getElementById("pBlind").checked = false;
-  if (els.pDependent) {
-    els.pDependent.checked = false;
-  }
-
-  document.getElementById("sFirst").value = "";
-  document.getElementById("sLast").value = "";
-  document.getElementById("sSsn").value = "";
-  document.getElementById("sDob").value = "";
-  document.getElementById("sBlind").checked = false;
-  if (els.sDependent) {
-    els.sDependent.checked = false;
-  }
-  els.traditionalIraDeduction.value = "";
-  els.hsaDeduction.value = "";
-  els.studentLoanInterestPaid.value = "";
-  if (els.studentLoanQualifiedLoan) {
-    els.studentLoanQualifiedLoan.checked = false;
-  }
-  if (els.studentLoanLegallyObligated) {
-    els.studentLoanLegallyObligated.checked = false;
-  }
-  els.estimatedTaxPayments.value = "";
-
-  els.w2Container.replaceChildren();
-  els.socialSecurityContainer.replaceChildren();
-  els.interestContainer.replaceChildren();
-  els.dividendContainer.replaceChildren();
-  els.dependentContainer.replaceChildren();
-  renderIncomeSummaryChips();
-
-  state.currentStep = 1;
-  state.w2Count = 0;
-  state.socialSecurityCount = 0;
-  state.interestCount = 0;
-  state.dividendCount = 0;
-  state.dependentCount = 0;
-
-  selectStatus("single");
-  goToStep(1);
+  applyDraftSnapshot(buildEmptyDraftSnapshot());
 
   document.querySelectorAll(".ssn-field").forEach((field) => {
     const input = field.querySelector(".ssn-input");

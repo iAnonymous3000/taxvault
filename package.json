@@ -6,7 +6,8 @@
     "node": ">=22"
   },
   "scripts": {
-    "check:web-js": "node --check web/app.js",
+    "check": "npm run check:web-js && cargo fmt --all --check && cargo clippy --workspace --all-targets --all-features -- -D warnings && cargo clippy --target wasm32-unknown-unknown -p taxvault-wasm -- -D warnings && cargo audit && cargo test --workspace && python3 -m unittest discover -s tests -p 'test_*.py' && python3 scripts/verify_tax_table.py --check && npm run test:web-smoke",
+    "check:web-js": "node --check web/app.js && node --check web/modules/review_packet.js",
     "test:web-smoke": "playwright test"
   },
   "devDependencies": {

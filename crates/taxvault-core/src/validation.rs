@@ -54,13 +54,13 @@ impl TaxFacts {
 
         // Validate dependents
         for (i, dep) in self.dependents.iter().enumerate() {
-            validate_required_text(
-                &format!("dependent {} first name", i + 1),
+            validate_required_text_lazy(
+                || format!("dependent {} first name", i + 1),
                 &dep.first_name,
                 &mut errors,
             );
-            validate_required_text(
-                &format!("dependent {} last name", i + 1),
+            validate_required_text_lazy(
+                || format!("dependent {} last name", i + 1),
                 &dep.last_name,
                 &mut errors,
             );
@@ -196,6 +196,20 @@ fn validate_required_text(field: &str, value: &str, errors: &mut Vec<ValidationE
     } else if value.len() > MAX_TEXT_FIELD_LENGTH {
         errors.push(ValidationError::FieldTooLong {
             field: field.to_string(),
+            max_length: MAX_TEXT_FIELD_LENGTH,
+        });
+    }
+}
+
+fn validate_required_text_lazy<F>(field: F, value: &str, errors: &mut Vec<ValidationError>)
+where
+    F: FnOnce() -> String,
+{
+    if value.trim().is_empty() {
+        errors.push(ValidationError::EmptyRequiredField { field: field() });
+    } else if value.len() > MAX_TEXT_FIELD_LENGTH {
+        errors.push(ValidationError::FieldTooLong {
+            field: field(),
             max_length: MAX_TEXT_FIELD_LENGTH,
         });
     }
