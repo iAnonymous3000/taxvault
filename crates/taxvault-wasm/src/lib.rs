@@ -178,9 +178,9 @@ fn compute_tax_inner(json_input: &str) -> WasmResult {
     if let Err(errs) = validate_supported_slice(&facts, rules) {
         let msgs: Vec<String> = errs.iter().map(|e| e.to_string()).collect();
         return WasmResult::err(format_error_list(
-                "This return is outside TaxVault's supported estimate slice:",
-                &msgs,
-            ));
+            "This return is outside TaxVault's supported estimate slice:",
+            &msgs,
+        ));
     }
 
     if !rules
