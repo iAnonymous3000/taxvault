@@ -8,6 +8,7 @@ from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 APP_JS = REPO_ROOT / "web" / "app.js"
+MODULE_JS = sorted((REPO_ROOT / "web" / "modules").glob("*.js"))
 
 
 class TestWebJsSyntax(unittest.TestCase):
@@ -25,6 +26,23 @@ class TestWebJsSyntax(unittest.TestCase):
             0,
             msg=f"node --check failed:\n{result.stderr or result.stdout}",
         )
+
+    @unittest.skipUnless(shutil.which("node"), "node not installed; skipping JS syntax check")
+    def test_module_js_parses(self) -> None:
+        for module_path in MODULE_JS:
+            with self.subTest(module=module_path.name):
+                result = subprocess.run(
+                    ["node", "--check", str(module_path)],
+                    cwd=REPO_ROOT,
+                    capture_output=True,
+                    text=True,
+                    check=False,
+                )
+                self.assertEqual(
+                    result.returncode,
+                    0,
+                    msg=f"node --check failed for {module_path.name}:\n{result.stderr or result.stdout}",
+                )
 
 
 if __name__ == "__main__":
