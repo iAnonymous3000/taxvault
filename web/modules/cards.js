@@ -1031,6 +1031,10 @@ export function createCardModule({
   const GIF87A_SIGNATURE = [0x47, 0x49, 0x46, 0x38, 0x37, 0x61];
   const GIF89A_SIGNATURE = [0x47, 0x49, 0x46, 0x38, 0x39, 0x61];
   const WEBP_RIFF_SIGNATURE = [0x52, 0x49, 0x46, 0x46];
+  const PDF_PREVIEW_TARGET_WIDTH = 520;
+  const PDF_PREVIEW_MAX_WIDTH = 720;
+  const PDF_PREVIEW_MAX_PAGES = 3;
+  const PDF_PREVIEW_MAX_DEVICE_SCALE = 2;
   const ISO_BMFF_IMAGE_BRANDS = new Set([
     "avif",
     "avis",
@@ -1042,8 +1046,37 @@ export function createCardModule({
     "mif1",
     "msf1",
   ]);
+  let pdfPreviewModulePromise = null;
+
+  function stopPdfPreviewRender(target) {
+    if (!(target instanceof HTMLElement)) {
+      return;
+    }
+
+    if (Array.isArray(target._pdfRenderTasks)) {
+      target._pdfRenderTasks.forEach((renderTask) => {
+        try {
+          renderTask.cancel();
+        } catch {
+          // Best-effort cleanup if the preview was removed mid-render.
+        }
+      });
+    }
+
+    if (target._pdfLoadingTask?.destroy) {
+      try {
+        void target._pdfLoadingTask.destroy();
+      } catch {
+        // Ignore cleanup failures for detached previews.
+      }
+    }
+
+    delete target._pdfRenderTasks;
+    delete target._pdfLoadingTask;
+  }
 
   function releasePreviewBlobUrl(target) {
+    stopPdfPreviewRender(target);
     const blobUrl = target?.dataset?.blobUrl;
     if (blobUrl) {
       URL.revokeObjectURL(blobUrl);
@@ -1104,6 +1137,157 @@ export function createCardModule({
       ) ||
       isIsoBmffImage(bytes)
     );
+  }
+
+  async function getPdfPreviewModule() {
+    if (!pdfPreviewModulePromise) {
+      pdfPreviewModulePromise = import("../vendor/pdfjs/pdf.min.mjs").then((pdfjsLib) => {
+        pdfjsLib.GlobalWorkerOptions.workerSrc = new URL(
+          "../vendor/pdfjs/pdf.worker.min.mjs",
+          import.meta.url
+        ).toString();
+        return pdfjsLib;
+      });
+    }
+
+    return pdfPreviewModulePromise;
+  }
+
+  function updatePdfPreviewStatus(status, message, tone = "info") {
+    status.textContent = message;
+    status.className = tone === "error"
+      ? "upload-preview-pdf-status error"
+      : "upload-preview-pdf-status";
+    status.hidden = false;
+  }
+
+  function clearPdfPreviewStatus(status) {
+    status.textContent = "";
+    status.className = "upload-preview-pdf-status";
+    status.hidden = true;
+  }
+
+  function getPdfPreviewRenderWidth(previewCard) {
+    const body = previewCard.querySelector(".upload-preview-body");
+    if (!(body instanceof HTMLElement)) {
+      return PDF_PREVIEW_TARGET_WIDTH;
+    }
+
+    const availableWidth = body.clientWidth - 16;
+    if (!Number.isFinite(availableWidth) || availableWidth <= 0) {
+      return PDF_PREVIEW_TARGET_WIDTH;
+    }
+
+    return Math.max(260, Math.min(availableWidth, PDF_PREVIEW_MAX_WIDTH));
+  }
+
+  async function renderPdfPreview(previewCard, file) {
+    if (!(previewCard instanceof HTMLElement)) {
+      return;
+    }
+
+    const status = previewCard.querySelector(".upload-preview-pdf-status");
+    const pages = previewCard.querySelector(".upload-preview-pdf-pages");
+    const footer = previewCard.querySelector(".upload-preview-pdf-footer");
+    const meta = previewCard.querySelector(".upload-preview-pdf-meta");
+
+    if (
+      !(status instanceof HTMLElement) ||
+      !(pages instanceof HTMLElement) ||
+      !(footer instanceof HTMLElement) ||
+      !(meta instanceof HTMLElement)
+    ) {
+      return;
+    }
+
+    updatePdfPreviewStatus(status, "Rendering PDF preview...");
+    pages.hidden = true;
+    footer.hidden = true;
+    pages.replaceChildren();
+    meta.textContent = "";
+    stopPdfPreviewRender(previewCard);
+
+    try {
+      const [pdfjsLib, fileBuffer] = await Promise.all([
+        getPdfPreviewModule(),
+        file.arrayBuffer(),
+      ]);
+
+      const loadingTask = pdfjsLib.getDocument({
+        data: new Uint8Array(fileBuffer),
+        useSystemFonts: true,
+        useWorkerFetch: false,
+        useWasm: false,
+        isOffscreenCanvasSupported: false,
+        isImageDecoderSupported: false,
+        stopAtErrors: false,
+      });
+      previewCard._pdfLoadingTask = loadingTask;
+
+      const pdfDocument = await loadingTask.promise;
+      if (!previewCard.isConnected) {
+        stopPdfPreviewRender(previewCard);
+        return;
+      }
+
+      const renderTasks = [];
+      previewCard._pdfRenderTasks = renderTasks;
+      const renderWidth = getPdfPreviewRenderWidth(previewCard);
+      const deviceScale = Math.min(window.devicePixelRatio || 1, PDF_PREVIEW_MAX_DEVICE_SCALE);
+      const renderedPages = Math.min(pdfDocument.numPages, PDF_PREVIEW_MAX_PAGES);
+
+      for (let pageNumber = 1; pageNumber <= renderedPages; pageNumber += 1) {
+        const page = await pdfDocument.getPage(pageNumber);
+        const baseViewport = page.getViewport({ scale: 1 });
+        const cssScale = renderWidth / baseViewport.width;
+        const cssViewport = page.getViewport({ scale: cssScale });
+        const renderViewport = page.getViewport({ scale: cssScale * deviceScale });
+        const canvas = document.createElement("canvas");
+        canvas.className = "upload-preview-pdf-canvas";
+        canvas.width = Math.max(1, Math.ceil(renderViewport.width));
+        canvas.height = Math.max(1, Math.ceil(renderViewport.height));
+        canvas.style.width = `${Math.max(1, Math.ceil(cssViewport.width))}px`;
+        canvas.style.height = `${Math.max(1, Math.ceil(cssViewport.height))}px`;
+        const context = canvas.getContext("2d", { alpha: false });
+
+        if (!context) {
+          throw new Error("Canvas rendering is unavailable in this browser.");
+        }
+
+        const renderTask = page.render({
+          canvasContext: context,
+          viewport: renderViewport,
+        });
+        renderTasks.push(renderTask);
+        await renderTask.promise;
+
+        if (!previewCard.isConnected) {
+          stopPdfPreviewRender(previewCard);
+          return;
+        }
+
+        pages.appendChild(canvas);
+        page.cleanup();
+      }
+
+      clearPdfPreviewStatus(status);
+      pages.hidden = false;
+      footer.hidden = false;
+      meta.textContent = pdfDocument.numPages > PDF_PREVIEW_MAX_PAGES
+        ? `Showing the first ${renderedPages} of ${pdfDocument.numPages} pages.`
+        : `${pdfDocument.numPages} ${pluralize(pdfDocument.numPages, "page")} rendered on screen.`;
+    } catch (error) {
+      if (!previewCard.isConnected) {
+        return;
+      }
+
+      const message = error?.message || "The PDF preview could not be rendered here.";
+      pages.replaceChildren();
+      pages.hidden = true;
+      footer.hidden = false;
+      meta.textContent = "Open the full PDF in a new tab if you still want to inspect it.";
+      updatePdfPreviewStatus(status, `Could not render the PDF preview here. ${message}`, "error");
+    }
   }
 
   async function readReferenceFileHeader(file, length = 32) {
@@ -1233,11 +1417,30 @@ export function createCardModule({
     const body = createElement("div", { className: "upload-preview-body" });
 
     if (previewKind === "pdf") {
-      const obj = document.createElement("object");
-      obj.data = blobUrl;
-      obj.type = "application/pdf";
-      obj.textContent = "PDF preview not available in this browser.";
-      body.appendChild(obj);
+      const pdfPreview = createElement("div", { className: "upload-preview-pdf" });
+      const pdfStatus = createElement("div", {
+        className: "upload-preview-pdf-status",
+        text: "Rendering PDF preview...",
+      });
+      const pdfPages = createElement("div", { className: "upload-preview-pdf-pages" });
+      const pdfFooter = createElement("div", { className: "upload-preview-pdf-footer" });
+      const pdfMeta = createElement("span", { className: "upload-preview-pdf-meta" });
+      const pdfLink = createElement("a", {
+        className: "upload-preview-pdf-link",
+        text: "Open full PDF",
+        attributes: {
+          href: blobUrl,
+          target: "_blank",
+          rel: "noopener noreferrer",
+          "aria-label": `Open ${file.name} in a new tab`,
+        },
+      });
+
+      pdfPages.hidden = true;
+      pdfFooter.hidden = true;
+      pdfFooter.append(pdfMeta, pdfLink);
+      pdfPreview.append(pdfStatus, pdfPages, pdfFooter);
+      body.appendChild(pdfPreview);
     } else {
       const img = document.createElement("img");
       img.src = blobUrl;
@@ -1283,17 +1486,19 @@ export function createCardModule({
       }
 
       existingKeys.add(fileKey);
-      previewList.appendChild(
-        createReferencePreviewCard(
-          file,
-          validation.previewKind,
-          fileKey,
-          previewSection,
-          previewList,
-          formLabel,
-          feedback
-        )
+      const previewCard = createReferencePreviewCard(
+        file,
+        validation.previewKind,
+        fileKey,
+        previewSection,
+        previewList,
+        formLabel,
+        feedback
       );
+      previewList.appendChild(previewCard);
+      if (validation.previewKind === "pdf") {
+        void renderPdfPreview(previewCard, file);
+      }
       addedCount += 1;
     }
 

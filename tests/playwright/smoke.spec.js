@@ -7,6 +7,40 @@ const ROOT = path.resolve(__dirname, "..", "..");
 const WASM_BUNDLE_PATH = path.join(ROOT, "web", "pkg", "taxvault_wasm.js");
 const TESTING_QUERY = "?taxvaultTesting=1";
 
+function escapePdfText(text) {
+  return text.replace(/\\/g, "\\\\").replace(/\(/g, "\\(").replace(/\)/g, "\\)");
+}
+
+function buildMinimalPdfBuffer(text = "TaxVault PDF preview") {
+  const safeText = escapePdfText(text).replace(/\r?\n/g, " ");
+  const stream = `BT /F1 24 Tf 24 120 Td (${safeText}) Tj ET`;
+  const objects = [
+    "<< /Type /Catalog /Pages 2 0 R >>",
+    "<< /Type /Pages /Kids [3 0 R] /Count 1 >>",
+    "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 240 180] /Resources << /Font << /F1 5 0 R >> >> /Contents 4 0 R >>",
+    `<< /Length ${Buffer.byteLength(stream, "utf8")} >>\nstream\n${stream}\nendstream`,
+    "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>",
+  ];
+
+  let pdf = "%PDF-1.4\n";
+  const offsets = [0];
+
+  objects.forEach((objectBody, index) => {
+    offsets.push(Buffer.byteLength(pdf, "utf8"));
+    pdf += `${index + 1} 0 obj\n${objectBody}\nendobj\n`;
+  });
+
+  const xrefOffset = Buffer.byteLength(pdf, "utf8");
+  pdf += `xref\n0 ${objects.length + 1}\n0000000000 65535 f \n`;
+
+  offsets.slice(1).forEach((offset) => {
+    pdf += `${String(offset).padStart(10, "0")} 00000 n \n`;
+  });
+
+  pdf += `trailer\n<< /Size ${objects.length + 1} /Root 1 0 R >>\nstartxref\n${xrefOffset}\n%%EOF\n`;
+  return Buffer.from(pdf, "utf8");
+}
+
 const mockResult = {
   summary: {
     tax_year: 2025,
@@ -570,6 +604,26 @@ test("reference uploads reject spoofed PDF content", async ({ page }) => {
     "did not match a supported PDF or image signature"
   );
   await expect(page.locator("#w2Container .upload-preview-card")).toHaveCount(0);
+});
+
+test("reference uploads render PDF previews on screen", async ({ page }) => {
+  await openApp(page);
+  await fillStep1Single(page);
+  await page.locator("#addInterestBtn").click();
+
+  const fileInput = page.locator("#interestContainer .upload-zone input[type=file]").first();
+  await fileInput.setInputFiles({
+    name: "1099-int-reference.pdf",
+    mimeType: "application/pdf",
+    buffer: buildMinimalPdfBuffer("1099-INT preview"),
+  });
+
+  const previewCard = page.locator("#interestContainer .upload-preview-card").first();
+  await expect(previewCard).toBeVisible();
+  await expect(previewCard.locator(".upload-preview-pdf-canvas")).toHaveCount(1);
+  await expect(previewCard.locator(".upload-preview-pdf-status")).toBeHidden();
+  await expect(previewCard.locator(".upload-preview-pdf-meta")).toContainText("page");
+  await expect(previewCard.locator(".upload-preview-pdf-link")).toHaveAttribute("href", /blob:/);
 });
 
 test("draft 1040 preview renders printable mock results", async ({ page }) => {
