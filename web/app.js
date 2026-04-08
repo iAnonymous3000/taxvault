@@ -167,6 +167,9 @@ const state = {
   filingStatus: "single",
   draftEnvelopeCreatedAt: null,
   lastDraftSavedAt: null,
+  lastDraftSessionSaveSucceeded: true,
+  lastDraftLocalSaveSucceeded: true,
+  lastDraftAttemptedLocalSave: false,
   draftSnapshotDirty: true,
   lastCapturedDraftSnapshot: null,
   lastSupportReview: null,
@@ -844,6 +847,47 @@ function rememberDraftEnabled() {
   return Boolean(els.rememberDraftToggle?.checked);
 }
 
+function setDraftSaveOutcome({
+  sessionSaved = true,
+  localSaved = true,
+  attemptedLocal = false,
+} = {}) {
+  state.lastDraftSessionSaveSucceeded = Boolean(sessionSaved);
+  state.lastDraftLocalSaveSucceeded = Boolean(localSaved);
+  state.lastDraftAttemptedLocalSave = Boolean(attemptedLocal);
+}
+
+function resetDraftSaveOutcome() {
+  setDraftSaveOutcome();
+}
+
+function currentDraftStatusMessage() {
+  const taxYear = currentTaxYear();
+  const sessionSaved = state.lastDraftSessionSaveSucceeded;
+  const attemptedLocal = state.lastDraftAttemptedLocalSave;
+  const localSaved = state.lastDraftLocalSaveSucceeded;
+
+  if (!sessionSaved && (!attemptedLocal || !localSaved)) {
+    return "TaxVault couldn't save the current draft in browser storage. Keep this tab open or export a draft file.";
+  }
+
+  if (rememberDraftEnabled()) {
+    if (sessionSaved && localSaved) {
+      return `Tax year ${taxYear} draft autosaves in this tab and stays on this device until you clear it.`;
+    }
+
+    if (sessionSaved && !localSaved) {
+      return `Tax year ${taxYear} draft autosaves in this tab, but TaxVault couldn't keep it on this device. Export a draft file if you need a backup.`;
+    }
+
+    if (!sessionSaved && localSaved) {
+      return `Tax year ${taxYear} draft stays on this device, but this browser session could not keep a tab autosave copy.`;
+    }
+  }
+
+  return `Tax year ${taxYear} draft autosaves in this tab and clears when the tab closes.`;
+}
+
 function setStorageStatusText(message) {
   if (els.storageStatusText) {
     els.storageStatusText.textContent = message;
@@ -896,18 +940,25 @@ function handleRememberDraftToggle() {
   const localStorageRef = storageFor("local");
 
   if (rememberDraftEnabled()) {
-    writeStoredValue(localStorageRef, draftPreferenceStorageKey(), "true");
     persistDraftSnapshot();
-    refreshStorageStatus("Draft will also stay on this device until you clear it.");
-    announceUiStatus("Draft persistence enabled for this device.");
+    refreshStorageStatus();
+    announceUiStatus(
+      state.lastDraftLocalSaveSucceeded
+        ? "Draft persistence enabled for this device."
+        : "TaxVault could not keep this draft on the device right now."
+    );
     return;
   }
 
   removeStoredValue(localStorageRef, draftPreferenceStorageKey());
   removeStoredValue(localStorageRef, draftLocalStorageKey());
   persistDraftSnapshot();
-  refreshStorageStatus("Draft will clear when this tab closes unless you enable device storage again.");
-  announceUiStatus("Device draft persistence disabled.");
+  refreshStorageStatus();
+  announceUiStatus(
+    state.lastDraftSessionSaveSucceeded
+      ? "Device draft persistence disabled."
+      : "Device draft persistence disabled, but this browser session could not autosave the current draft."
+  );
 }
 
 function refreshStorageStatus(message = "") {
@@ -922,11 +973,7 @@ function refreshStorageStatus(message = "") {
     return;
   }
 
-  setStorageStatusText(
-    rememberDraftEnabled()
-    ? `Tax year ${currentTaxYear()} draft autosaves in this tab and stays on this device until you clear it.`
-    : `Tax year ${currentTaxYear()} draft autosaves in this tab and clears when the tab closes.`
-  );
+  setStorageStatusText(currentDraftStatusMessage());
   updateStorageStatusTimestamp();
   updateStorageTrustCopy();
 }
@@ -940,6 +987,24 @@ function updateStorageTrustCopy() {
   if (!localStorageRef) {
     els.storageTrustCopy.textContent =
       "This browser mode only allows tab-only autosave, so nothing stays on the device after the tab closes.";
+    return;
+  }
+
+  if (!state.lastDraftSessionSaveSucceeded && (!state.lastDraftAttemptedLocalSave || !state.lastDraftLocalSaveSucceeded)) {
+    els.storageTrustCopy.textContent =
+      "This browser could not save the current draft in storage. Export a draft file if you need a backup.";
+    return;
+  }
+
+  if (rememberDraftEnabled() && state.lastDraftAttemptedLocalSave && !state.lastDraftLocalSaveSucceeded) {
+    els.storageTrustCopy.textContent =
+      "TaxVault is keeping this draft only in the current tab right now because device storage failed.";
+    return;
+  }
+
+  if (rememberDraftEnabled() && !state.lastDraftSessionSaveSucceeded && state.lastDraftLocalSaveSucceeded) {
+    els.storageTrustCopy.textContent =
+      "TaxVault kept this draft on the device, but tab-only autosave failed in this browser session.";
     return;
   }
 
@@ -1107,6 +1172,7 @@ function clearStoredDraftData({ refreshStatus = true, taxYear = currentTaxYear()
   removeStoredValue(localStorageRef, draftLocalStorageKey(taxYear));
   state.draftEnvelopeCreatedAt = null;
   state.lastDraftSavedAt = null;
+  resetDraftSaveOutcome();
 
   if (refreshStatus) {
     refreshStorageStatus();
@@ -1118,20 +1184,42 @@ function storeDraftEnvelope(envelope, { refreshStatus = true } = {}) {
   const localStorageRef = storageFor("local");
   const serialized = JSON.stringify(envelope);
   const taxYear = normalizeTaxYear(envelope?.taxYear);
+  const sessionKey = draftSessionStorageKey(taxYear);
+  const localKey = draftLocalStorageKey(taxYear);
+  const preferenceKey = draftPreferenceStorageKey(taxYear);
+  const attemptedLocalSave = rememberDraftEnabled();
+  const sessionSaved = writeStoredValue(sessionStorageRef, sessionKey, serialized);
+  let localSaved = true;
 
-  writeStoredValue(sessionStorageRef, draftSessionStorageKey(taxYear), serialized);
-
-  if (rememberDraftEnabled()) {
-    writeStoredValue(localStorageRef, draftPreferenceStorageKey(taxYear), "true");
-    writeStoredValue(localStorageRef, draftLocalStorageKey(taxYear), serialized);
-  } else {
-    removeStoredValue(localStorageRef, draftLocalStorageKey(taxYear));
+  if (!sessionSaved) {
+    removeStoredValue(sessionStorageRef, sessionKey);
   }
+
+  if (attemptedLocalSave) {
+    const preferenceSaved = writeStoredValue(localStorageRef, preferenceKey, "true");
+    const draftSaved = writeStoredValue(localStorageRef, localKey, serialized);
+    localSaved = preferenceSaved && draftSaved;
+    if (!localSaved) {
+      removeStoredValue(localStorageRef, localKey);
+    }
+  } else {
+    removeStoredValue(localStorageRef, localKey);
+  }
+
+  setDraftSaveOutcome({
+    sessionSaved,
+    localSaved,
+    attemptedLocal: attemptedLocalSave,
+  });
 
   state.draftEnvelopeCreatedAt =
     typeof envelope.createdAt === "string" && envelope.createdAt ? envelope.createdAt : null;
   state.lastDraftSavedAt =
-    typeof envelope.updatedAt === "string" && envelope.updatedAt ? envelope.updatedAt : null;
+    (sessionSaved || (attemptedLocalSave && localSaved)) &&
+    typeof envelope.updatedAt === "string" &&
+    envelope.updatedAt
+      ? envelope.updatedAt
+      : null;
 
   if (refreshStatus) {
     refreshStorageStatus();
@@ -3247,6 +3335,7 @@ function clearAllData() {
   state.safetyAcknowledged = false;
   state.draftEnvelopeCreatedAt = null;
   state.lastDraftSavedAt = null;
+  resetDraftSaveOutcome();
   els.gateAcknowledge.checked = false;
   updateGateButtonState();
   els.app.classList.add("hidden");

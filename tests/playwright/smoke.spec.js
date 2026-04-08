@@ -349,6 +349,31 @@ test("draft status shows the last saved time and clear fields resets a W-2 card"
   await expect(page.locator("#storageStatus")).toContainText("Last saved");
 });
 
+test("storage status warns when tab autosave fails instead of claiming success", async ({ page }) => {
+  await openApp(page);
+
+  await page.evaluate(() => {
+    const originalSetItem = Storage.prototype.setItem;
+    Storage.prototype.setItem = function setItemWithQuotaFailure(key, value) {
+      if (String(key).startsWith("taxvault:draft:session:")) {
+        throw new DOMException("Quota exceeded", "QuotaExceededError");
+      }
+      return originalSetItem.call(this, key, value);
+    };
+  });
+
+  await page.locator("#pFirst").fill("Alex");
+
+  await expect(page.locator("#storageStatus")).toContainText(
+    "couldn't save the current draft in browser storage"
+  );
+
+  const storedKeys = await page.evaluate(() =>
+    Object.keys(window.sessionStorage).filter((key) => key.startsWith("taxvault:draft:session:"))
+  );
+  expect(storedKeys).toEqual([]);
+});
+
 test("Clear All Data removes TaxVault drafts from every storage bucket", async ({ page }) => {
   await openApp(page);
   await page.locator("#pFirst").fill("Alex");
