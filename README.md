@@ -20,6 +20,18 @@ Known release blockers:
 - `docs/release-checklist.md` still needs named approvers, sign-off dates, and the deployed commit SHA
 - The stronger public-release verification command must pass: `python3 scripts/verify_tax_table.py --report --check --require-public-release-ready`
 
+Current engineering validation status:
+
+- `cargo fmt --all --check` passes
+- `cargo clippy --workspace --all-targets --all-features -- -D warnings` passes
+- `cargo clippy --target wasm32-unknown-unknown -p taxvault-wasm -- -D warnings` passes
+- `cargo test --workspace` passes
+- `python3 -m unittest discover -s tests -p 'test_*.py'` passes
+- `python3 scripts/verify_tax_table.py --report --check` passes
+- `npm run check:web-js` passes
+- `npm run test:web-smoke` passes
+- `PLAYWRIGHT_ALL_BROWSERS=1 npm run test:web-smoke` passes locally
+
 ## Important Warning
 
 Tax Vault is **not** a filing product.
