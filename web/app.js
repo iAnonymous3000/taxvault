@@ -429,13 +429,21 @@ function announceUiStatus(message) {
   }, 0);
 }
 
-function focusElement(target) {
+function prefersReducedMotion() {
+  return window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+}
+
+function focusElement(target, { preventScroll = false } = {}) {
   if (!(target instanceof HTMLElement) || draftRestoreInProgress) {
     return;
   }
 
   window.requestAnimationFrame(() => {
-    target.focus();
+    try {
+      target.focus({ preventScroll });
+    } catch {
+      target.focus();
+    }
   });
 }
 
@@ -468,6 +476,24 @@ function getFocusableElements(root) {
       !element.closest(".hidden") &&
       element.offsetParent !== null
   );
+}
+
+function scrollViewportToElement(target, { offset = 0 } = {}) {
+  if (!(target instanceof HTMLElement) || typeof window.scrollTo !== "function") {
+    return;
+  }
+
+  const behavior = prefersReducedMotion() ? "instant" : "smooth";
+
+  window.requestAnimationFrame(() => {
+    const top = Math.max(0, target.getBoundingClientRect().top + window.scrollY + offset);
+    window.scrollTo({ top, behavior });
+  });
+}
+
+function scrollViewportToCurrentStep(step = state.currentStep) {
+  const section = document.getElementById(`step${step}`);
+  scrollViewportToElement(section || els.mainContent);
 }
 
 function handleDocumentKeydown(event) {
@@ -1461,9 +1487,6 @@ function showDisclaimerGate() {
 function hideDisclaimerGate() {
   els.disclaimerGate.classList.add("hidden");
   document.body.classList.remove("gate-open");
-  const focusTarget = lastGateFocusedElement || document.getElementById("pFirst");
-  lastGateFocusedElement = null;
-  focusElement(focusTarget);
 }
 
 function updateGateButtonState() {
@@ -1478,6 +1501,15 @@ function acknowledgeSafetyGate() {
   state.safetyAcknowledged = true;
   hideDisclaimerGate();
   els.app.classList.remove("hidden");
+  if (lastGateFocusedElement instanceof HTMLElement) {
+    focusElement(lastGateFocusedElement);
+    lastGateFocusedElement = null;
+    return;
+  }
+
+  lastGateFocusedElement = null;
+  focusElement(els.mainContent, { preventScroll: true });
+  scrollViewportToCurrentStep(1);
 }
 
 function handleStatusOptionKeydown(event) {
@@ -1600,13 +1632,7 @@ function goToStep(step) {
   }
 
   scheduleDraftSave();
-
-  if (typeof window.scrollTo === "function") {
-    const motion = window.matchMedia("(prefers-reduced-motion: reduce)").matches
-      ? "instant"
-      : "smooth";
-    window.scrollTo({ top: 0, behavior: motion });
-  }
+  scrollViewportToCurrentStep(step);
 }
 
 function updateStepIndicator() {

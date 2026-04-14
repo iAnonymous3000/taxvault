@@ -1,11 +1,13 @@
 const fs = require("node:fs");
 const path = require("node:path");
 
-const { test, expect } = require("@playwright/test");
+const { test, expect, devices } = require("@playwright/test");
 
 const ROOT = path.resolve(__dirname, "..", "..");
 const WASM_BUNDLE_PATH = path.join(ROOT, "web", "pkg", "taxvault_wasm.js");
 const TESTING_QUERY = "?taxvaultTesting=1";
+const IPHONE_SE = devices["iPhone SE"];
+const PIXEL_5 = devices["Pixel 5"];
 
 function escapePdfText(text) {
   return text.replace(/\\/g, "\\\\").replace(/\(/g, "\\(").replace(/\)/g, "\\)");
@@ -330,6 +332,57 @@ async function renderMockResult(page) {
   expect(rendered).toBe(true);
   await expect(page.locator("#step3")).toHaveClass(/active/);
 }
+
+test.describe("mobile flow", () => {
+  test.skip(({ browserName }) => browserName === "firefox", "Firefox does not support mobile emulation.");
+  test.use({
+    viewport: IPHONE_SE.viewport,
+    userAgent: IPHONE_SE.userAgent,
+    deviceScaleFactor: IPHONE_SE.deviceScaleFactor,
+    isMobile: IPHONE_SE.isMobile,
+    hasTouch: IPHONE_SE.hasTouch,
+  });
+
+  test("disclaimer gate stays operable and lands at the start of step 1", async ({ page }) => {
+    await openApp(page);
+    await expect(page.locator("#step1 .section-intro-title")).toBeInViewport();
+    await expect(page.locator("#step1 .section-intro-title")).toContainText(
+      "Set up the people on this estimate"
+    );
+  });
+
+  test("step transitions keep the active mobile section in view", async ({ page }) => {
+    await openApp(page);
+    await fillStep1Single(page);
+
+    await expect(page.locator("#step2 .section-intro-title")).toBeInViewport();
+
+    await addSupportedW2(page);
+    await waitForReadyReview(page);
+    await page.locator("#computeBtn").click();
+
+    await expect(page.locator("#step3 .result-hero")).toBeInViewport();
+  });
+});
+
+test.describe("android mobile flow", () => {
+  test.skip(({ browserName }) => browserName === "firefox", "Firefox does not support mobile emulation.");
+  test.use({
+    viewport: PIXEL_5.viewport,
+    userAgent: PIXEL_5.userAgent,
+    deviceScaleFactor: PIXEL_5.deviceScaleFactor,
+    isMobile: PIXEL_5.isMobile,
+    hasTouch: PIXEL_5.hasTouch,
+  });
+
+  test("disclaimer gate keeps the primary action in view on common Android screens", async ({
+    page,
+  }) => {
+    await waitForAppToLoad(page);
+    await expect(page.locator("#gateAcknowledge")).toBeInViewport();
+    await expect(page.locator("#gateContinueBtn")).toBeInViewport();
+  });
+});
 
 test("supported return becomes ready when the tax table allows local estimates", async ({ page }) => {
   await openApp(page);
@@ -855,6 +908,10 @@ test("imported draft can be completed and recomputed after re-entering SSNs and 
     mimeType: "application/json",
     buffer: Buffer.from(JSON.stringify(exportedDraft)),
   });
+
+  await expect(page.locator("#pFirst")).toHaveValue("Alex");
+  await expect(page.locator("#w2-1-employer")).toHaveValue("Northwind Co");
+  await expect(page.locator("#storageStatus")).toContainText("Draft imported.");
 
   await page.locator("#pSsn").fill("400-01-0001");
   await page.locator("#step1ContinueBtn").click();

@@ -1262,6 +1262,8 @@ body.gate-open {
   padding: 1.2rem;
   background: rgba(0, 0, 0, 0.8);
   backdrop-filter: blur(8px);
+  overflow-y: auto;
+  overscroll-behavior: contain;
 }
 
 .gate-card {
@@ -2037,6 +2039,48 @@ body.gate-open {
 
 /* ── Mobile ── */
 @media (max-width: 560px) {
+  .gate-title {
+    font-size: clamp(1.2rem, 6.6vw, 1.45rem);
+  }
+
+  .gate-copy,
+  .gate-list,
+  .gate-check {
+    font-size: 0.88rem;
+  }
+
+  .gate-copy {
+    margin-top: 0.65rem;
+  }
+
+  .gate-side-note {
+    padding: 0.8rem;
+  }
+
+  .gate-side-list {
+    margin-top: 0.55rem;
+    font-size: 0.8rem;
+  }
+
+  .gate-list {
+    margin-top: 0.65rem;
+  }
+
+  .gate-list li + li {
+    margin-top: 0.3rem;
+  }
+
+  .gate-check {
+    gap: 0.6rem;
+    margin-top: 0.65rem;
+    padding: 0.75rem 0.85rem;
+  }
+
+  .gate-card .btn {
+    min-height: 2.75rem;
+    margin-top: 0.65rem;
+  }
+
   .header-chips,
   .welcome-layout,
   .scope-grid,
@@ -2128,6 +2172,16 @@ body.gate-open {
     padding: 1rem;
   }
 
+  .gate-overlay {
+    align-items: flex-start;
+    padding-top: max(1rem, env(safe-area-inset-top, 1rem));
+    padding-bottom: max(1rem, env(safe-area-inset-bottom, 1rem));
+  }
+
+  .gate-card {
+    margin: 0 auto;
+  }
+
   .w2-card-header,
   .support-review-header,
   .breakdown-row,
@@ -2153,6 +2207,15 @@ body.gate-open {
   .draft-line-value {
     min-width: 0;
     text-align: left;
+  }
+
+  .draft-watermark {
+    max-width: 85%;
+    font-size: clamp(1.6rem, 10vw, 2.4rem);
+    letter-spacing: 0.12em;
+    white-space: normal;
+    line-height: 0.9;
+    text-align: center;
   }
 
   .container {
@@ -2206,11 +2269,20 @@ body.gate-open {
     position: sticky;
     bottom: 0;
     z-index: 10;
+    display: grid;
+    grid-template-columns: minmax(0, 0.8fr) minmax(0, 1.2fr);
+    gap: 0.65rem;
     margin: 1.35rem -1rem 0;
-    padding: 0.85rem 1rem;
+    padding: 0.85rem 1rem max(0.85rem, env(safe-area-inset-bottom, 0.85rem));
     background: var(--bg-surface);
     border-top: 1px solid var(--border-subtle);
     box-shadow: 0 -4px 12px rgba(0, 0, 0, 0.3);
+  }
+
+  #step2 > .actions .btn {
+    min-width: 0;
+    min-height: 3.15rem;
+    padding-inline: 0.85rem;
   }
 }
 
