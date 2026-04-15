@@ -1,3 +1,64 @@
+export function buildSupportSnapshotRedactions(snapshot) {
+  const replacements = [];
+  const addReplacement = (value, replacement) => {
+    const text = typeof value === "string" ? value.trim() : "";
+    if (!text) {
+      return;
+    }
+    replacements.push({ text, replacement });
+  };
+  const fullName = (person) =>
+    [person?.firstName, person?.lastName]
+      .filter((value) => typeof value === "string" && value.trim() !== "")
+      .join(" ")
+      .trim();
+
+  addReplacement(fullName(snapshot?.primaryFiler), "Primary filer");
+  addReplacement(snapshot?.primaryFiler?.ssn, "[redacted ssn]");
+  addReplacement(snapshot?.primaryFiler?.dob, "[redacted dob]");
+
+  addReplacement(fullName(snapshot?.spouse), "Spouse");
+  addReplacement(snapshot?.spouse?.ssn, "[redacted ssn]");
+  addReplacement(snapshot?.spouse?.dob, "[redacted dob]");
+
+  if (Array.isArray(snapshot?.dependents)) {
+    snapshot.dependents.forEach((dependent, index) => {
+      const label = `dependent ${index + 1}`;
+      const name = fullName(dependent);
+      if (name) {
+        addReplacement(`${label} (${name})`, label);
+        addReplacement(name, `Dependent ${index + 1}`);
+      }
+      addReplacement(dependent?.ssn, "[redacted ssn]");
+      addReplacement(dependent?.dob, "[redacted dob]");
+    });
+  }
+
+  if (Array.isArray(snapshot?.w2s)) {
+    snapshot.w2s.forEach((w2, index) => {
+      addReplacement(w2?.employerName, `W-2 #${index + 1} employer`);
+      addReplacement(w2?.employerEin, "[redacted ein]");
+    });
+  }
+
+  if (Array.isArray(snapshot?.interestIncome)) {
+    snapshot.interestIncome.forEach((item, index) => {
+      addReplacement(item?.payerName, `1099-INT #${index + 1} payer`);
+    });
+  }
+
+  if (Array.isArray(snapshot?.dividendIncome)) {
+    snapshot.dividendIncome.forEach((item, index) => {
+      addReplacement(item?.payerName, `1099-DIV #${index + 1} payer`);
+    });
+  }
+
+  return Array.from(
+    new Map(replacements.map((entry) => [entry.text, entry.replacement])).entries(),
+    ([text, replacement]) => ({ text, replacement })
+  ).sort((left, right) => right.text.length - left.text.length);
+}
+
 export function createDraftHelpers({
   constants,
   currentTaxYear,
@@ -199,67 +260,6 @@ export function createDraftHelpers({
           }))
         : [],
     };
-  }
-
-  function buildSupportSnapshotRedactions(snapshot) {
-    const replacements = [];
-    const addReplacement = (value, replacement) => {
-      const text = typeof value === "string" ? value.trim() : "";
-      if (!text) {
-        return;
-      }
-      replacements.push({ text, replacement });
-    };
-    const fullName = (person) =>
-      [person?.firstName, person?.lastName]
-        .filter((value) => typeof value === "string" && value.trim() !== "")
-        .join(" ")
-        .trim();
-
-    addReplacement(fullName(snapshot?.primaryFiler), "Primary filer");
-    addReplacement(snapshot?.primaryFiler?.ssn, "[redacted ssn]");
-    addReplacement(snapshot?.primaryFiler?.dob, "[redacted dob]");
-
-    addReplacement(fullName(snapshot?.spouse), "Spouse");
-    addReplacement(snapshot?.spouse?.ssn, "[redacted ssn]");
-    addReplacement(snapshot?.spouse?.dob, "[redacted dob]");
-
-    if (Array.isArray(snapshot?.dependents)) {
-      snapshot.dependents.forEach((dependent, index) => {
-        const label = `dependent ${index + 1}`;
-        const name = fullName(dependent);
-        if (name) {
-          addReplacement(`${label} (${name})`, label);
-          addReplacement(name, `Dependent ${index + 1}`);
-        }
-        addReplacement(dependent?.ssn, "[redacted ssn]");
-        addReplacement(dependent?.dob, "[redacted dob]");
-      });
-    }
-
-    if (Array.isArray(snapshot?.w2s)) {
-      snapshot.w2s.forEach((w2, index) => {
-        addReplacement(w2?.employerName, `W-2 #${index + 1} employer`);
-        addReplacement(w2?.employerEin, "[redacted ein]");
-      });
-    }
-
-    if (Array.isArray(snapshot?.interestIncome)) {
-      snapshot.interestIncome.forEach((item, index) => {
-        addReplacement(item?.payerName, `1099-INT #${index + 1} payer`);
-      });
-    }
-
-    if (Array.isArray(snapshot?.dividendIncome)) {
-      snapshot.dividendIncome.forEach((item, index) => {
-        addReplacement(item?.payerName, `1099-DIV #${index + 1} payer`);
-      });
-    }
-
-    return Array.from(
-      new Map(replacements.map((entry) => [entry.text, entry.replacement])).entries(),
-      ([text, replacement]) => ({ text, replacement })
-    ).sort((left, right) => right.text.length - left.text.length);
   }
 
   function redactSensitiveText(value, replacements) {

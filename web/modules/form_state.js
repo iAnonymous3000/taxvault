@@ -6,7 +6,7 @@ function cloneList(items) {
   return Array.isArray(items) ? items.map((item) => cloneRecord(item)) : [];
 }
 
-function cloneSnapshot(snapshot) {
+export function cloneSnapshot(snapshot) {
   return {
     ...cloneRecord(snapshot),
     primaryFiler: cloneRecord(snapshot?.primaryFiler),

@@ -1,6 +1,7 @@
 const fs = require("node:fs");
 const path = require("node:path");
 
+const AxeBuilder = require("@axe-core/playwright").default;
 const { test, expect, devices } = require("@playwright/test");
 
 const ROOT = path.resolve(__dirname, "..", "..");
@@ -288,6 +289,36 @@ async function openApp(page, options) {
   await expect(page.locator("#app")).not.toHaveClass(/hidden/);
 }
 
+test("document metadata advertises dark browser chrome", async ({ page }) => {
+  await waitForAppToLoad(page, { enableTestingHooks: false });
+  await expect(page.locator('meta[name="color-scheme"]')).toHaveAttribute("content", "dark");
+  await expect(page.locator('meta[name="theme-color"]')).toHaveAttribute("content", "#0a0e17");
+});
+
+test("required step 1 fields preserve hint associations when inline errors are shown", async ({
+  page,
+}) => {
+  await openApp(page);
+  await expect(page.locator("#pFirst")).toHaveAttribute("aria-required", "true");
+  await expect(page.locator("#pSsn")).toHaveAttribute("aria-describedby", "pSsnHint");
+  await expect(page.locator("#pDob")).toHaveAttribute("aria-describedby", "pDobHint");
+
+  await page.locator("#step1ContinueBtn").click();
+
+  await expect(page.locator("#pSsn")).toHaveAttribute("aria-describedby", /pSsnHint/);
+  await expect(page.locator("#pSsn")).toHaveAttribute("aria-describedby", /pSsn-error/);
+  await expect(page.locator("#pDob")).toHaveAttribute("aria-describedby", /pDobHint/);
+  await expect(page.locator("#pDob")).toHaveAttribute("aria-describedby", /pDob-error/);
+});
+
+test("opened app passes the scoped axe accessibility smoke audit", async ({ page }) => {
+  await openApp(page);
+
+  const accessibilityScanResults = await new AxeBuilder({ page }).include("#app").analyze();
+
+  expect(accessibilityScanResults.violations).toEqual([]);
+});
+
 async function fillStep1Single(page) {
   await page.locator("#pFirst").fill("Alex");
   await page.locator("#pLast").fill("Filer");
@@ -295,6 +326,24 @@ async function fillStep1Single(page) {
   await page.locator("#pDob").fill("1990-06-15");
   await page.locator("#step1ContinueBtn").click();
   await expect(page.locator("#step2")).toHaveClass(/active/);
+}
+
+async function fillDependent(page, index, { firstName, lastName, ssn, dob, relationship, months }) {
+  const prefix = `#dep-${index}`;
+
+  await expect(page.locator(`${prefix}-first`)).toBeVisible();
+  await page.locator(`${prefix}-first`).fill(firstName);
+  await expect(page.locator(`${prefix}-first`)).toHaveValue(firstName);
+  await page.locator(`${prefix}-last`).fill(lastName);
+  await expect(page.locator(`${prefix}-last`)).toHaveValue(lastName);
+  await page.locator(`${prefix}-ssn`).fill(ssn);
+  await expect(page.locator(`${prefix}-ssn`)).toHaveValue(ssn);
+  await page.locator(`${prefix}-dob`).fill(dob);
+  await expect(page.locator(`${prefix}-dob`)).toHaveValue(dob);
+  await page.locator(`${prefix}-relationship`).selectOption(relationship);
+  await expect(page.locator(`${prefix}-relationship`)).toHaveValue(relationship);
+  await page.locator(`${prefix}-months`).fill(months);
+  await expect(page.locator(`${prefix}-months`)).toHaveValue(months);
 }
 
 async function addSupportedW2(page, wages = "60000") {
@@ -586,12 +635,14 @@ test("Head of Household parent case is blocked before the income step", async ({
   await page.locator("#pLast").fill("Filer");
   await page.locator("#pSsn").fill("400-01-0001");
   await page.locator("#pDob").fill("1990-06-15");
-  await page.locator("#dep-1-first").fill("Pat");
-  await page.locator("#dep-1-last").fill("Filer");
-  await page.locator("#dep-1-ssn").fill("400-02-0002");
-  await page.locator("#dep-1-dob").fill("1950-06-15");
-  await page.locator("#dep-1-relationship").selectOption("parent");
-  await page.locator("#dep-1-months").fill("12");
+  await fillDependent(page, 1, {
+    firstName: "Pat",
+    lastName: "Filer",
+    ssn: "400-02-0002",
+    dob: "1950-06-15",
+    relationship: "parent",
+    months: "12",
+  });
   await page.locator("#step1ContinueBtn").click();
   await expect(page.locator("#step1")).toHaveClass(/active/);
   await expect(page.locator("#error")).toContainText(
@@ -930,12 +981,14 @@ test("draft import replaces existing cards instead of duplicating them", async (
   await page.locator("#pSsn").fill("400-01-0001");
   await page.locator("#pDob").fill("1990-06-15");
   await page.locator("#addDependentBtn").click();
-  await page.locator("#dep-1-first").fill("Casey");
-  await page.locator("#dep-1-last").fill("Filer");
-  await page.locator("#dep-1-ssn").fill("400-02-0002");
-  await page.locator("#dep-1-dob").fill("2017-05-20");
-  await page.locator("#dep-1-relationship").selectOption("daughter");
-  await page.locator("#dep-1-months").fill("12");
+  await fillDependent(page, 1, {
+    firstName: "Casey",
+    lastName: "Filer",
+    ssn: "400-02-0002",
+    dob: "2017-05-20",
+    relationship: "daughter",
+    months: "12",
+  });
   await page.locator("#step1ContinueBtn").click();
   await expect(page.locator("#step2")).toHaveClass(/active/);
 

@@ -6,12 +6,20 @@
     "node": ">=22"
   },
   "scripts": {
-    "check": "npm run check:web-js && cargo fmt --all --check && cargo clippy --workspace --all-targets --all-features -- -D warnings && cargo clippy --target wasm32-unknown-unknown -p taxvault-wasm -- -D warnings && cargo audit && cargo test --workspace && python3 -m unittest discover -s tests -p 'test_*.py' && python3 scripts/verify_tax_table.py --check && npm run test:web-smoke",
+    "check": "npm run check:web-js && npm run lint:web-js && npm run test:web-unit && npm run audit:web-deps && cargo fmt --all --check && cargo clippy --workspace --all-targets --all-features -- -D warnings && cargo clippy --target wasm32-unknown-unknown -p taxvault-wasm -- -D warnings && cargo audit && cargo test --workspace && python3 -m unittest discover -s tests -p 'test_*.py' && python3 scripts/verify_tax_table.py --check && npm run test:web-smoke",
+    "audit:web-deps": "npm audit --omit=optional --audit-level=high",
     "check:web-js": "node --check web/app.js && for f in web/modules/*.js; do node --check \"$f\"; done",
+    "lint:web-js": "eslint web/app.js web/modules/*.js tests/playwright/smoke.spec.js playwright.config.js tests/unit/**/*.test.mjs",
+    "test:web-unit": "vitest run",
     "test:web-smoke": "playwright test"
   },
   "devDependencies": {
+    "@axe-core/playwright": "^4.11.1",
+    "@eslint/js": "^10.0.1",
     "@playwright/test": "1.59.1",
-    "pdfjs-dist": "^5.6.205"
+    "eslint": "^10.2.0",
+    "globals": "^17.5.0",
+    "pdfjs-dist": "^5.6.205",
+    "vitest": "^4.1.4"
   }
 }

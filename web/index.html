@@ -3,6 +3,8 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="color-scheme" content="dark">
+<meta name="theme-color" content="#0a0e17">
 <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; style-src 'self'; img-src 'self' data: blob:; object-src 'self' blob:; base-uri 'none'; form-action 'none'; frame-ancestors 'none'; connect-src 'self'">
 <meta http-equiv="Referrer-Policy" content="no-referrer">
 <meta http-equiv="Permissions-Policy" content="camera=(), microphone=(), geolocation=(), payment=(), usb=(), bluetooth=(), serial=(), hid=()">
@@ -13,6 +15,17 @@
 <body>
 
 <a class="skip-link" href="#mainContent">Skip to estimate form</a>
+<noscript>
+  <style>
+    #loading,
+    #app {
+      display: none !important;
+    }
+  </style>
+  <div class="noscript-banner" role="alert">
+    TaxVault requires JavaScript to load the local tax engine and run estimates in your browser.
+  </div>
+</noscript>
 
 <header class="header">
   <div class="header-inner">
@@ -22,7 +35,7 @@
       Get a quick federal tax estimate without sending your tax details through a cloud filing
       workflow.
     </p>
-    <div class="header-chips" aria-label="TaxVault highlights">
+    <div class="header-chips" role="group" aria-label="TaxVault highlights">
       <span class="header-chip">Runs in your browser</span>
       <span class="header-chip">No cloud upload required</span>
       <span class="header-chip">Estimate only, not filing</span>
@@ -108,7 +121,7 @@
             TaxVault is built for people who want a fast estimate, a clear scope, and tighter
             control over where their tax data goes.
           </p>
-          <div class="welcome-pill-row" aria-label="Beginner guidance">
+          <div class="welcome-pill-row" role="group" aria-label="Beginner guidance">
             <span class="welcome-pill">About 5 to 10 minutes</span>
             <span class="welcome-pill">Most common path: W-2 only</span>
             <span class="welcome-pill">No account required</span>
@@ -220,7 +233,7 @@
           </p>
         </article>
       </div>
-      <div class="app-toolbar" aria-label="Draft storage and privacy tools">
+      <div class="app-toolbar" role="group" aria-label="Draft storage and privacy tools">
         <div class="toolbar-status" id="storageStatus" aria-live="polite">
           <span id="storageStatusText">Draft stays only in this tab and clears when the tab closes.</span>
           <span class="toolbar-status-meta hidden" id="storageStatusTimestamp"></span>
@@ -288,7 +301,7 @@
         <div class="row">
           <div class="field">
             <label for="taxYearSelect">Federal Tax Year</label>
-            <select id="taxYearSelect" aria-labelledby="taxYearTitle"></select>
+            <select id="taxYearSelect" aria-labelledby="taxYearTitle" aria-describedby="taxYearHint"></select>
             <div class="field-hint" id="taxYearHint">
               Loading the embedded tax-year configuration for this build.
             </div>
@@ -346,11 +359,11 @@
         <div class="row">
           <div class="field">
             <label for="pFirst">First Name</label>
-            <input id="pFirst" autocomplete="given-name" maxlength="200" placeholder="John">
+            <input id="pFirst" autocomplete="given-name" maxlength="200" placeholder="John" aria-required="true">
           </div>
           <div class="field">
             <label for="pLast">Last Name</label>
-            <input id="pLast" autocomplete="family-name" maxlength="200" placeholder="Doe">
+            <input id="pLast" autocomplete="family-name" maxlength="200" placeholder="Doe" aria-required="true">
           </div>
         </div>
         <div class="row">
@@ -365,20 +378,22 @@
                 inputmode="numeric"
                 maxlength="11"
                 placeholder="123-45-6789"
+                aria-required="true"
+                aria-describedby="pSsnHint"
               >
               <button class="ssn-toggle" type="button" aria-controls="pSsn" aria-pressed="false">
                 Show
               </button>
             </div>
-            <div class="field-hint">
+            <div class="field-hint" id="pSsnHint">
               Hidden on screen by default. Used locally to validate the return and build the draft
               preview.
             </div>
           </div>
           <div class="field">
             <label for="pDob">Date of Birth</label>
-            <input id="pDob" type="date" autocomplete="bday" data-date-kind="dob">
-            <div class="field-hint">Used to determine age-based standard deduction rules.</div>
+            <input id="pDob" type="date" autocomplete="bday" data-date-kind="dob" aria-required="true" aria-describedby="pDobHint">
+            <div class="field-hint" id="pDobHint">Used to determine age-based standard deduction rules.</div>
           </div>
         </div>
         <div class="checkbox-row">
@@ -388,7 +403,7 @@
           </label>
           <label class="checkbox-field" for="pDependent">
             <input id="pDependent" type="checkbox">
-            <span>Someone else can claim me as a dependent for 2025</span>
+            <span id="pDependentLabelText">Someone else can claim me as a dependent for 2025</span>
           </label>
         </div>
       </div>
@@ -398,11 +413,11 @@
         <div class="row">
           <div class="field">
             <label for="sFirst">First Name</label>
-            <input id="sFirst" autocomplete="given-name" maxlength="200" placeholder="Jane">
+            <input id="sFirst" autocomplete="given-name" maxlength="200" placeholder="Jane" aria-required="true">
           </div>
           <div class="field">
             <label for="sLast">Last Name</label>
-            <input id="sLast" autocomplete="family-name" maxlength="200" placeholder="Doe">
+            <input id="sLast" autocomplete="family-name" maxlength="200" placeholder="Doe" aria-required="true">
           </div>
         </div>
         <div class="row">
@@ -417,20 +432,22 @@
                 inputmode="numeric"
                 maxlength="11"
                 placeholder="123-45-6789"
+                aria-required="true"
+                aria-describedby="sSsnHint"
               >
               <button class="ssn-toggle" type="button" aria-controls="sSsn" aria-pressed="false">
                 Show
               </button>
             </div>
-            <div class="field-hint">
+            <div class="field-hint" id="sSsnHint">
               Hidden on screen by default. Used locally to validate the return and build the draft
               preview.
             </div>
           </div>
           <div class="field">
             <label for="sDob">Date of Birth</label>
-            <input id="sDob" type="date" autocomplete="bday" data-date-kind="dob">
-            <div class="field-hint">Used to determine age-based standard deduction rules.</div>
+            <input id="sDob" type="date" autocomplete="bday" data-date-kind="dob" aria-required="true" aria-describedby="sDobHint">
+            <div class="field-hint" id="sDobHint">Used to determine age-based standard deduction rules.</div>
           </div>
         </div>
         <div class="checkbox-row">
@@ -440,7 +457,7 @@
           </label>
           <label class="checkbox-field" for="sDependent">
             <input id="sDependent" type="checkbox">
-            <span>Someone else can claim my spouse as a dependent for 2025</span>
+            <span id="sDependentLabelText">Someone else can claim my spouse as a dependent for 2025</span>
           </label>
         </div>
       </div>
@@ -635,7 +652,7 @@
               <text class="form-label" x="31" y="62">Recipient information</text>
               <rect class="form-box-highlight" x="22" y="80" width="216" height="34" rx="10"></rect>
               <text class="form-label-strong" x="31" y="94">Box 5</text>
-              <text class="form-caption" x="72" y="94">Net benefits for 2025</text>
+              <text class="form-caption" id="socialSecurityYearCaption" x="72" y="94">Net benefits for 2025</text>
               <rect class="form-box-highlight" x="22" y="122" width="216" height="24" rx="8"></rect>
               <text class="form-label-strong" x="31" y="137">Box 6</text>
               <text class="form-caption" x="72" y="137">Federal tax withheld</text>
@@ -763,7 +780,7 @@
         <div class="field-hint">
           Required only when the Student Loan Interest Paid amount is greater than zero.
         </div>
-        <div class="inline-note">
+        <div class="inline-note" id="studentLoanYearNote">
           TaxVault applies the 2025 student loan interest cap and MAGI phaseout automatically
           after those confirmations. Estimated tax payments flow to Form 1040 line 26.
         </div>

@@ -28,7 +28,6 @@ export function createCardModule({
     resetComputedEstimate,
     scheduleDraftSave,
     scheduleSupportReview,
-    setSsnVisibility,
     showError,
     todayIsoDate,
   } = helpers;

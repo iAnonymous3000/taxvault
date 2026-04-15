@@ -1,6 +1,6 @@
-export function dedupeMessages(messages) {
-  return [...new Set(Array.isArray(messages) ? messages : [])];
-}
+import { dedupeMessages } from "./common.js";
+
+export { dedupeMessages };
 
 export function coalesceStringList(value) {
   if (!Array.isArray(value)) {

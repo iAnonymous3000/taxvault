@@ -27,6 +27,9 @@ jobs:
       - name: Cache Rust artifacts
         uses: Swatinem/rust-cache@v2
 
+      - name: Install web dependencies
+        run: npm ci
+
       - name: Check formatting
         run: cargo fmt --all --check
 
@@ -64,6 +67,15 @@ jobs:
 
       - name: Check web app JavaScript syntax
         run: npm run check:web-js
+
+      - name: Lint web app JavaScript
+        run: npm run lint:web-js
+
+      - name: Run web unit tests
+        run: npm run test:web-unit
+
+      - name: Audit npm dependencies
+        run: npm run audit:web-deps
 
       - name: Verify embedded tax table rows
         run: python3 scripts/verify_tax_table.py --check

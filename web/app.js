@@ -1,12 +1,13 @@
 import init, { compute_tax, get_app_config, review_tax_input } from "./pkg/taxvault_wasm.js";
 import { createCardModule } from "./modules/cards.js";
+import { isPastOrToday } from "./modules/common.js";
 import { createDraftHelpers } from "./modules/draft_helpers.js";
 import { createExportModule } from "./modules/exports.js";
 import { createDraftFormState } from "./modules/form_state.js";
+import { normalizeMoneyValue } from "./modules/money.js";
 import { buildPayloadFromSnapshot, validateStep1Snapshot } from "./modules/tax_input.js";
 import {
   buildSupportReviewSnapshot as buildSupportReviewSnapshotFromModule,
-  dedupeMessages as dedupeMessagesFromModule,
   normalizeSupportReviewSnapshot as normalizeSupportReviewSnapshotFromModule,
   supportReviewBadgeLabel as supportReviewBadgeLabelFromModule,
 } from "./modules/support_review.js";
@@ -360,10 +361,24 @@ async function start() {
     applyRuntimeConfig(loadRuntimeConfig());
     state.wasmReady = true;
     restoreDraftPreference();
-    restoreDraftSnapshot();
+    let draftRestoreFailed = false;
+
+    try {
+      restoreDraftSnapshot();
+    } catch (error) {
+      console.error(error);
+      clearStoredDraftData({ refreshStatus: true });
+      draftRestoreFailed = true;
+    }
+
     els.loading.classList.add("hidden");
     syncComputeButtonState();
     showDisclaimerGate();
+
+    if (draftRestoreFailed) {
+      showError("A saved draft could not be restored and was cleared from browser storage.");
+      announceUiStatus("Saved draft could not be restored and was cleared.");
+    }
   } catch (error) {
     renderLoadingError(
       `Failed to load the tax engine. Refresh the page and try again.\n\n${safeMessage(error)}`
@@ -494,6 +509,12 @@ function scrollViewportToElement(target, { offset = 0 } = {}) {
 function scrollViewportToCurrentStep(step = state.currentStep) {
   const section = document.getElementById(`step${step}`);
   scrollViewportToElement(section || els.mainContent);
+}
+
+function waitForNextFrame() {
+  return new Promise((resolve) => {
+    window.requestAnimationFrame(() => resolve());
+  });
 }
 
 function handleDocumentKeydown(event) {
@@ -750,11 +771,38 @@ function renderTaxYearSelector() {
   if (availableCount <= 1) {
     els.taxYearHint.textContent =
       "This build includes one embedded federal rule pack, but drafts and exports already stay keyed to that tax year.";
+    updateTaxYearCopy();
     return;
   }
 
   els.taxYearHint.textContent =
     "Switching years opens that year's separate local draft and reloads the page into the matching rule pack.";
+  updateTaxYearCopy();
+}
+
+function updateTaxYearCopy() {
+  const taxYear = currentTaxYear();
+  const primaryDependentLabel = document.getElementById("pDependentLabelText");
+  const spouseDependentLabel = document.getElementById("sDependentLabelText");
+  const socialSecurityYearCaption = document.getElementById("socialSecurityYearCaption");
+  const studentLoanYearNote = document.getElementById("studentLoanYearNote");
+
+  if (primaryDependentLabel) {
+    primaryDependentLabel.textContent = `Someone else can claim me as a dependent for ${taxYear}`;
+  }
+
+  if (spouseDependentLabel) {
+    spouseDependentLabel.textContent = `Someone else can claim my spouse as a dependent for ${taxYear}`;
+  }
+
+  if (socialSecurityYearCaption) {
+    socialSecurityYearCaption.textContent = `Net benefits for ${taxYear}`;
+  }
+
+  if (studentLoanYearNote) {
+    studentLoanYearNote.textContent =
+      `TaxVault applies the ${taxYear} student loan interest cap and MAGI phaseout automatically after those confirmations. Estimated tax payments flow to Form 1040 line 26.`;
+  }
 }
 
 function handleTaxYearSelectionChange(event) {
@@ -1129,10 +1177,6 @@ function flushPendingDraftSave() {
   persistDraftSnapshot();
 }
 
-function snapshotHasUserData(snapshot) {
-  return draftHelpers.snapshotHasUserData(snapshot);
-}
-
 function isPlainObject(value) {
   return Boolean(value) && typeof value === "object" && !Array.isArray(value);
 }
@@ -1159,28 +1203,12 @@ function captureDraftSnapshot() {
   return draftFormState.captureDraftSnapshot();
 }
 
-function stripPiiFromSnapshot(snapshot) {
-  return draftHelpers.stripPiiFromSnapshot(snapshot);
-}
-
 function buildAnonymizedSupportInputSnapshot(snapshot, taxYear) {
   return draftHelpers.buildAnonymizedSupportInputSnapshot(snapshot, taxYear);
 }
 
 function redactSupportSnapshotEnvelope(envelope, rawSnapshot) {
   return draftHelpers.redactSupportSnapshotEnvelope(envelope, rawSnapshot);
-}
-
-function buildDraftEnvelope(snapshot, { createdAt, updatedAt, piiRedacted = true, taxYear } = {}) {
-  return draftHelpers.buildDraftEnvelope(snapshot, { createdAt, updatedAt, piiRedacted, taxYear });
-}
-
-function looksLikeDraftEnvelope(value) {
-  return draftHelpers.looksLikeDraftEnvelope(value);
-}
-
-function looksLikeLegacyDraftSnapshot(value) {
-  return draftHelpers.looksLikeLegacyDraftSnapshot(value);
 }
 
 function buildStoredDraftEnvelope(snapshot, { createdAt, taxYear } = {}) {
@@ -1524,7 +1552,7 @@ function handleStatusOptionKeydown(event) {
     return;
   }
 
-  let nextIndex = index;
+  let nextIndex;
   switch (event.key) {
     case "ArrowRight":
     case "ArrowDown":
@@ -1702,7 +1730,7 @@ function showError(messages, fieldErrors = []) {
       hint.textContent = msg;
       const errorId = `${id}-error`;
       hint.id = errorId;
-      input.setAttribute("aria-describedby", errorId);
+      addDescribedByToken(input, errorId);
       input.closest(".field")?.appendChild(hint);
       if (!firstInvalid) {
         firstInvalid = input;
@@ -1728,12 +1756,45 @@ function clearFieldErrors() {
   document.querySelectorAll(".field-error-inline").forEach((el) => el.remove());
   document.querySelectorAll('[aria-invalid="true"]').forEach((el) => {
     el.removeAttribute("aria-invalid");
-    el.removeAttribute("aria-describedby");
+    removeDescribedByToken(el, fieldErrorId(el));
   });
 }
 
 function fieldErrorId(control) {
   return control instanceof HTMLElement && control.id ? `${control.id}-error` : "";
+}
+
+function describedByTokens(control) {
+  if (!(control instanceof HTMLElement)) {
+    return [];
+  }
+
+  return (control.getAttribute("aria-describedby") || "").split(/\s+/).filter(Boolean);
+}
+
+function addDescribedByToken(control, token) {
+  if (!(control instanceof HTMLElement) || !token) {
+    return;
+  }
+
+  const tokens = new Set(describedByTokens(control));
+  tokens.add(token);
+  control.setAttribute("aria-describedby", [...tokens].join(" "));
+}
+
+function removeDescribedByToken(control, token) {
+  if (!(control instanceof HTMLElement) || !token) {
+    return;
+  }
+
+  const tokens = describedByTokens(control).filter((value) => value !== token);
+
+  if (tokens.length === 0) {
+    control.removeAttribute("aria-describedby");
+    return;
+  }
+
+  control.setAttribute("aria-describedby", tokens.join(" "));
 }
 
 function clearInlineErrorForControl(control) {
@@ -1751,9 +1812,7 @@ function clearInlineErrorForControl(control) {
     error.remove();
   }
 
-  if (control.getAttribute("aria-describedby") === errorId) {
-    control.removeAttribute("aria-describedby");
-  }
+  removeDescribedByToken(control, errorId);
 
   control.removeAttribute("aria-invalid");
 }
@@ -1781,7 +1840,7 @@ function setInlineErrorForControl(control, message) {
   hint.id = errorId;
   field.appendChild(hint);
   control.setAttribute("aria-invalid", "true");
-  control.setAttribute("aria-describedby", errorId);
+  addDescribedByToken(control, errorId);
 }
 
 function isBlankCard(card, selectors) {
@@ -2198,22 +2257,6 @@ function addDependent({ focusNewCard = true, batched = false } = {}) {
   return card;
 }
 
-function updateRemoveButtons() {
-  return cardModule.updateRemoveButtons();
-}
-
-function updateInterestRemoveButtons() {
-  return cardModule.updateInterestRemoveButtons();
-}
-
-function updateSocialSecurityRemoveButtons() {
-  return cardModule.updateSocialSecurityRemoveButtons();
-}
-
-function updateDividendRemoveButtons() {
-  return cardModule.updateDividendRemoveButtons();
-}
-
 function updateDependentRemoveButtons() {
   return cardModule.updateDependentRemoveButtons();
 }
@@ -2420,11 +2463,7 @@ function setSupportReviewItems(section, list, items) {
   section.classList.toggle("hidden", items.length === 0);
 }
 
-function dedupeMessages(messages) {
-  return dedupeMessagesFromModule(messages);
-}
-
-function computeReturn() {
+async function computeReturn() {
   if (!state.safetyAcknowledged) {
     showDisclaimerGate();
     return;
@@ -2475,6 +2514,7 @@ function computeReturn() {
   setComputeHelp("Calculating locally in your browser...", "pending");
 
   try {
+    await waitForNextFrame();
     const resultJson = compute_tax(JSON.stringify(payload));
     const data = JSON.parse(resultJson);
 
@@ -2940,37 +2980,6 @@ function formatLineValue(value) {
   return String(value);
 }
 
-function normalizeMoneyValue(rawValue) {
-  const trimmed = String(rawValue || "").trim();
-
-  if (trimmed === "") {
-    return "";
-  }
-
-  const hasParens = trimmed.startsWith("(") && trimmed.endsWith(")");
-  let normalized = trimmed.replace(/[$,\s]/g, "");
-
-  if (hasParens) {
-    normalized = `-${normalized.slice(1, -1)}`;
-  }
-
-  if (!/^-?(?:\d+(?:\.\d{0,2})?|\.\d{1,2})$/.test(normalized)) {
-    return null;
-  }
-
-  if (normalized.startsWith(".")) {
-    normalized = `0${normalized}`;
-  } else if (normalized.startsWith("-.")) {
-    normalized = normalized.replace("-.", "-0.");
-  }
-
-  const [wholePart, fractionPart = ""] = normalized.split(".");
-  const compactWholePart = wholePart.replace(/^(-?)0+(?=\d)/, "$1") || "0";
-  const compactFractionPart = fractionPart.replace(/0+$/, "");
-
-  return compactFractionPart ? `${compactWholePart}.${compactFractionPart}` : compactWholePart;
-}
-
 function parseMoney(rawValue, defaultValue = Number.NaN) {
   const trimmed = String(rawValue || "").trim();
 
@@ -3008,23 +3017,8 @@ function formatDigits(value, groups) {
   return parts.join("-");
 }
 
-function isPastOrToday(dateString) {
-  const date = new Date(`${dateString}T00:00:00`);
-  if (Number.isNaN(date.getTime())) {
-    return false;
-  }
-
-  const today = new Date();
-  const cutoff = new Date(today.getFullYear(), today.getMonth(), today.getDate());
-  return date <= cutoff;
-}
-
 function safeMessage(error) {
   return error instanceof Error ? error.message : String(error);
-}
-
-function makeExportFilename(prefix, envelope, ext, { stampKey = "exportedAt" } = {}) {
-  return exportModule.makeExportFilename(prefix, envelope, ext, { stampKey });
 }
 
 function draftExportFilename(envelope) {
@@ -3045,10 +3039,6 @@ function reviewPacketExportFilename(envelope) {
 
 function downloadFile(contents, fileName, mimeType) {
   return exportModule.downloadFile(contents, fileName, mimeType);
-}
-
-function downloadJsonFile(contents, fileName) {
-  return exportModule.downloadJsonFile(contents, fileName);
 }
 
 function tryDownloadFile(contents, fileName, mimeType, label) {
@@ -3086,10 +3076,6 @@ function exportDraftToFile() {
   }
   refreshStorageStatus("Draft exported. SSNs and EINs are never included in TaxVault draft files.");
   announceUiStatus("Draft exported.");
-}
-
-function buildEstimateExportSnapshot(result) {
-  return exportModule.buildEstimateExportSnapshot(result);
 }
 
 function buildAuditTrailEnvelope(result, { draftEnvelope = null, supportReview = null } = {}) {
@@ -3412,7 +3398,13 @@ function cleanupReferencePreviews(root) {
   return cardModule.cleanupReferencePreviews(root);
 }
 
-if (typeof window !== "undefined" && testingHooksEnabled()) {
+const testingHooksActive = typeof window !== "undefined" && testingHooksEnabled();
+
+if (typeof document !== "undefined") {
+  document.documentElement.toggleAttribute("data-testing", testingHooksActive);
+}
+
+if (testingHooksActive) {
   window.__taxvaultTesting = Object.freeze({
     goToStep,
     importDraftValue,
