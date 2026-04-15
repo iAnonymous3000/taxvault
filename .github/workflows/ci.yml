@@ -57,7 +57,7 @@ jobs:
           cargo llvm-cov --workspace --lcov --output-path coverage/rust.lcov
 
       - name: Upload Rust coverage artifact
-        uses: actions/upload-artifact@v6
+        uses: actions/upload-artifact@v7
         with:
           name: rust-coverage-lcov
           path: coverage/rust.lcov
